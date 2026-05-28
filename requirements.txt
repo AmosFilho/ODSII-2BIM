@@ -1,0 +1,10 @@
+agno>=2.0.0
+ollama>=0.4.0
+pypdf>=5.0.0
+tantivy>=0.22.0
+sqlalchemy>=2.0.0
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+openai>=1.50.0
+chromadb>=0.4.0
+pylance
