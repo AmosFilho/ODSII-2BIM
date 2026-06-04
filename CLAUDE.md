@@ -1,56 +1,57 @@
-# LLM Wiki Schema for Gaming Tutorials, Gameplays, Patches, and Walkthroughs
+# LLM Wiki Schema for AmazonIA Travel
 
 ## Overview
-This schema defines how the LLM maintains a wiki for gaming content. The wiki consists of three layers:
-1. **Raw Sources**: Immutable collection of source documents (articles, papers, images, data files).
-2. **Wiki**: LLM-generated markdown files (summaries, entity pages, concept pages, comparisons, overview, synthesis).
-3. **Schema**: This document (CLAUDE.md) that tells the LLM how to structure the wiki and maintain consistency.
+
+This schema defines how the LLM maintains a vertical tourism wiki for Amazonas travel planning. The wiki has three layers:
+
+1. **Raw Sources**: Source notes, public references, transcripts, guides, and curated travel material.
+2. **Wiki**: Markdown pages generated or maintained by the LLM for RAG retrieval.
+3. **Schema**: This document, which defines structure, naming, workflow, and quality rules.
 
 ## Directory Structure
-- `raw_sources/` : Place source materials here (e.g., game manuals, patch notes, gameplay videos transcripts, tutorial texts).
-- `wiki/` : LLM-generated markdown files. The LLM owns this directory entirely.
-  - `wiki/entities/` : Pages for specific games, characters, items, etc.
-  - `wiki/concepts/` : Pages for game mechanics, genres, terminology.
-  - `wiki/comparisons/` : Pages comparing games, versions, strategies.
-  - `wiki/overviews/` : High-level overviews (e.g., "Overview of Game X", "Overview of Patch Y").
-  - `wiki/synthesis/` : Synthesis pages that combine multiple sources (e.g., "Complete Walkthrough of Game Z").
-  - `wiki/index.md` : Main index page linking to all other pages.
+
+- `raw_sources/`: Source materials for tourism in Amazonas. Keep original source notes here.
+- `wiki/`: Curated Markdown knowledge base used by the RAG agent.
+  - `wiki/entities/`: Destinations, attractions, operators, travel profiles, and experience types.
+  - `wiki/concepts/`: Planning concepts such as seasonality, logistics, safety, responsible tourism, and budget framing.
+  - `wiki/comparisons/`: Comparisons between destinations, seasons, route options, or travel profiles.
+  - `wiki/overviews/`: High-level domain overviews.
+  - `wiki/synthesis/`: Itineraries, decision guides, and synthesized travel playbooks.
+  - `wiki/index.md`: Main index linking to the most important pages.
 
 ## Naming Conventions
-- Use lowercase with hyphens for file names (e.g., `game-overview.md`, `patch-notes-1.2.md`).
-- Entity pages: `entities/<game-name>-<entity-type>.md` (e.g., `entities/zelda-breath-of-the-wild-character-link.md`).
-- Concept pages: `concepts/<concept-name>.md` (e.g., `concepts/open-world-exploration.md`).
-- Comparison pages: `comparisons/<item1>-vs-<item2>.md` (e.g., `comparisons/zelda-ocarina-of-time-vs-majoras-mask.md`).
-- Overview pages: `overviews/<topic>-overview.md` (e.g., `overviews/gameplay-overview.md`).
-- Synthesis pages: `synthesis/<topic>-synthesis.md` (e.g., `synthesis/complete-walkthrough-final-fantasy-vii.md`).
+
+- Use lowercase with hyphens for file names.
+- Entity pages: `entities/<amazonas-topic>.md`, such as `entities/amazonas-destinations.md`.
+- Concept pages: `concepts/<planning-topic>.md`, such as `concepts/amazonas-travel-planning.md`.
+- Comparison pages: `comparisons/<item1>-vs-<item2>.md`.
+- Overview pages: `overviews/<topic>-overview.md`.
+- Synthesis pages: `synthesis/<topic>.md`, such as `synthesis/amazonas-itineraries.md`.
 
 ## Workflow for Ingesting New Sources
-1. When a new source is added to `raw_sources/`, the LLM should:
-   a. Read the source to understand its content.
-   b. Determine which wiki pages need to be created or updated.
-   c. Update existing wiki pages to reflect new information, maintaining consistency.
-   d. Create new wiki pages for new entities, concepts, or topics not covered.
-   e. Update cross-references between pages.
-   f. Update the index (`wiki/index.md`) if necessary.
+
+1. Read the source and identify its tourism scope.
+2. Decide whether it updates destinations, logistics, seasonality, safety, culture, sustainability, or itineraries.
+3. Update existing wiki pages before creating duplicates.
+4. Create new pages only when the topic deserves independent retrieval.
+5. Add cross-links and update `wiki/index.md` when a page becomes important.
+6. Mark dynamic information, such as prices and schedules, as requiring current verification.
 
 ## Workflow for Answering Questions
-1. When asked a question about gaming tutorials, gameplays, patches, or walkthroughs:
-   a. First, consult the wiki (`wiki/`) for relevant information.
-   b. If the wiki does not have sufficient information, consult the raw sources.
-   c. Synthesize an answer based on the wiki and raw sources, citing sources when possible.
-   d. If the answer reveals gaps in the wiki, note them for future updates.
 
-## Maintenance
-- The LLM should periodically review the wiki for consistency, outdated information, and broken links.
-- When multiple sources conflict, the LLM should note the discrepancy and present both viewpoints if appropriate.
-- The LLM should not modify raw sources; they are immutable.
+1. Consult `wiki/` first.
+2. If the answer is incomplete, consult `raw_sources/` if relevant.
+3. For current prices, schedules, availability, regulations, weather alerts, road conditions, or event calendars, use current sources or clearly state that verification is required.
+4. Synthesize practical guidance in Brazilian Portuguese.
+5. Ask for missing traveler constraints when they materially change the answer, such as dates, number of days, budget, comfort level, mobility, and interests.
 
-## Example Pages
-- `wiki/entities/mario-character-mario.md`: Information about Mario from the Mario series.
-- `wiki/concepts/power-up.md`: Explanation of power-up mechanics in games.
-- `wiki/comparisons/super-mario-bros-3-vs-super-mario-world.md`: Comparison of two Mario games.
-- `wiki/overviews/mario-series-overview.md`: Overview of the Mario series.
-- `wiki/synthesis/super-mario-bros-3-walkthrough.md`: Step-by-step walkthrough of Super Mario Bros 3.
+## Quality Rules
+
+- Do not invent prices, schedules, legal requirements, medical guidance, or operator availability.
+- Distinguish stable travel knowledge from information that changes frequently.
+- Prefer responsible tourism: local benefit, environmental care, respect for communities, consent for photos, and safe operators.
+- When information conflicts, present the uncertainty and recommend verification.
 
 ## Revision History
-- 2026-06-02: Initial schema created.
+
+- 2026-06-04: Converted the project schema from gaming content to Amazonas tourism.

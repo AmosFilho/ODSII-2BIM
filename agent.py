@@ -1,16 +1,16 @@
 """
-Agente RAG local com Agno + Ollama.
+Agente RAG vertical para turismo e viagens no Amazonas com Agno + Ollama.
 
 Antes de rodar:
     1. Tenha o Ollama instalado e rodando (https://ollama.com)
     2. Baixe os modelos:
         ollama pull llama3.1:8b
         ollama pull nomic-embed-text
-    3. Instale as dependências:
+    3. Instale as dependencias:
         pip install -r requirements.txt
-    4. Coloque seus PDFs na pasta `docs/`
-    5. Na primeira execução, deixe `LOAD_DOCS = True` para indexar.
-       Depois, mude para False para não reprocessar a cada execução.
+    4. Mantenha a base de conhecimento em `wiki/`.
+    5. Na primeira execucao, deixe `LOAD_DOCS = True` para indexar.
+       Depois, mude para False para nao reprocessar a cada execucao.
 """
 
 import json
@@ -19,11 +19,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from agno.agent import Agent
-from agno.models.ollama import Ollama
-from agno.knowledge.knowledge import Knowledge
-from agno.vectordb.chroma import ChromaDb, SearchType
-from agno.knowledge.embedder.ollama import OllamaEmbedder
 from agno.db.sqlite import SqliteDb
+from agno.knowledge.embedder.ollama import OllamaEmbedder
+from agno.knowledge.knowledge import Knowledge
+from agno.models.ollama import Ollama
+from agno.vectordb.chroma import ChromaDb, SearchType
 
 try:
     from agno.tools.duckduckgo import DuckDuckGoTools
@@ -35,13 +35,13 @@ try:
 except ImportError:
     OpenAI = None  # type: ignore[assignment]
 
-# ---------- Configuração ----------
-LOAD_DOCS = False            # mude para False após a primeira indexação
-DOCS_PATH = "docs"            # pasta com seus PDFs
-CHAT_MODEL = "llama3.1:8b"      # modelo de chat do Ollama
-EMBED_MODEL = "nomic-embed-text:v1.5"  # modelo de embeddings
+# ---------- Configuracao ----------
+LOAD_DOCS = True
+DOCS_PATH = "wiki"
+CHAT_MODEL = "llama3.1:8b"
+EMBED_MODEL = "nomic-embed-text:v1.5"
 DB_FILE = "tmp/agent.db"
-SESSION_ID = "assistente_documentos"
+SESSION_ID = "amazonas_travel_rag"
 USER_ID = "usuario_local"
 HISTORY_MESSAGES = 20
 HISTORY_FILE = "tmp/conversation_history.json"
@@ -57,7 +57,7 @@ os.makedirs(AUDIO_OUTPUT_DIR, exist_ok=True)
 
 # ---------- Vector store local (ChromaDB) ----------
 vector_db = ChromaDb(
-    collection="documentos",
+    collection="turismo_amazonas",
     path="tmp/chromadb",
     persistent_client=True,
     search_type=SearchType.hybrid,
@@ -69,15 +69,16 @@ vector_db = ChromaDb(
 
 # ---------- Base de conhecimento ----------
 knowledge = Knowledge(
-    name="Base de documentos local",
-    description="Documentos PDF carregados localmente",
+    name="Wiki AmazonIA Travel",
+    description="Base vertical de turismo, viagem e planejamento no Amazonas",
     vector_db=vector_db,
 )
 
 if LOAD_DOCS:
-    print(f"Indexando documentos da pasta '{DOCS_PATH}/' ...")
+    print(f"Indexando base de conhecimento da pasta '{DOCS_PATH}/' ...")
     knowledge.add_content(path=DOCS_PATH)
-    print("Indexação concluída.\n")
+    print("Indexacao concluida.\n")
+
 
 def responder_comando_de_voz(
     audio_path: str,
@@ -117,7 +118,10 @@ def responder_comando_de_voz(
         messages=[
             {
                 "role": "system",
-                "content": "Responda em portugues do Brasil, de forma direta e natural.",
+                "content": (
+                    "Responda em portugues do Brasil, como uma IA de turismo "
+                    "especializada no Amazonas. Seja direta, natural e segura."
+                ),
             },
             {"role": "user", "content": comando},
         ],
@@ -169,7 +173,7 @@ def build_tools() -> List[Any]:
 
 # ---------- Agente ----------
 agent = Agent(
-    name="Assistente de Documentos",
+    name="AmazonIA Travel",
     model=Ollama(id=CHAT_MODEL),
     knowledge=knowledge,
     tools=build_tools(),
@@ -183,11 +187,14 @@ agent = Agent(
     overwrite_db_session_state=False,
     num_history_runs=5,
     instructions=[
-        "Você é um assistente que responde com base nos documentos fornecidos.",
-        "Sempre cite o trecho do documento que sustenta sua resposta.",
-        "Se a informação não estiver nos documentos, diga isso claramente.",
-        "Responda em português do Brasil.",
-        "Use a tool de web search quando o usuario pedir informacoes atuais ou fora dos documentos.",
+        "Voce e a AmazonIA Travel, uma IA vertical especializada em turismo e viagens para o Amazonas.",
+        "Use a wiki local como fonte principal para destinos, roteiros, clima, logistica, cultura, seguranca e boas praticas.",
+        "Raciocine como consultor de viagem: considere perfil do viajante, tempo disponivel, orcamento, epoca do ano e restricoes.",
+        "Sempre cite o trecho ou pagina da base que sustenta sua resposta quando houver contexto recuperado.",
+        "Se a informacao nao estiver na base, diga isso claramente e sinalize quando uma verificacao atual for necessaria.",
+        "Use web search quando o usuario pedir informacoes atuais, precos, horarios, disponibilidade, regras recentes, eventos ou noticias.",
+        "Nao invente precos, horarios, disponibilidade de passeios, condicoes de estrada, regras sanitarias ou exigencias legais.",
+        "Responda em portugues do Brasil, com tom pratico e acolhedor.",
         "Use a tool responder_comando_de_voz quando o usuario informar um caminho de arquivo de audio e pedir resposta em voz.",
     ],
     debug_mode=True,
@@ -196,9 +203,9 @@ agent = Agent(
 
 session = agent.get_session(session_id=SESSION_ID, user_id=USER_ID)
 if session:
-    print(f"Histórico persistente carregado para a sessão '{SESSION_ID}'.")
+    print(f"Historico persistente carregado para a sessao '{SESSION_ID}'.")
 else:
-    print(f"Criando nova sessão persistente '{SESSION_ID}'.")
+    print(f"Criando nova sessao persistente '{SESSION_ID}'.")
 
 
 def load_conversation_history() -> List[Dict[str, str]]:
@@ -216,32 +223,26 @@ def save_conversation_history(history: List[Dict[str, str]]) -> None:
         json.dump(history, f, ensure_ascii=False, indent=2)
 
 
-# ---------- Função de RAG manual ----------
-def buscar_contexto(pergunta: str, top_k: int = 3) -> str:
+# ---------- Funcao de RAG manual ----------
+def buscar_contexto(pergunta: str, top_k: int = 4) -> str:
     """
-    Busca os documentos relevantes no banco vetorial
-    e retorna apenas o conteúdo textual.
+    Busca os trechos relevantes na wiki vetorial
+    e retorna apenas o conteudo textual.
     """
 
     resultados = vector_db.search(pergunta, limit=top_k)
-
     contextos = []
 
     for i, doc in enumerate(resultados, start=1):
-
         conteudo = ""
 
-        # tenta pegar conteúdo de forma segura
         if hasattr(doc, "content"):
             conteudo = doc.content
-
         elif isinstance(doc, dict):
             conteudo = doc.get("content", "")
 
         if conteudo:
-            contextos.append(
-                f"[Trecho {i}]\n{conteudo}"
-            )
+            contextos.append(f"[Trecho {i}]\n{conteudo}")
 
     return "\n\n".join(contextos)
 
@@ -252,20 +253,53 @@ def build_history_text(history: List[Dict[str, str]]) -> str:
 
     lines = []
     for item in history[-MAX_HISTORY_ENTRIES:]:
-        role = "Usuário" if item["role"] == "user" else "Assistente"
+        role = "Usuario" if item["role"] == "user" else "Assistente"
         lines.append(f"{role}: {item['content']}")
 
     return "\n".join(lines)
+
+
+def build_travel_prompt(pergunta: str, contexto: str, history_text: str = "") -> str:
+    history_section = (
+        f"Historico da conversa anterior:\n{history_text}\n\n" if history_text else ""
+    )
+
+    return f"""
+Voce e a AmazonIA Travel, uma IA vertical especializada em turismo e viagens
+para o Amazonas. Sua tarefa e ajudar viajantes, guias, agencias e gestores
+a planejar experiencias responsaveis no estado.
+
+{history_section}Use o contexto abaixo como fonte principal para responder.
+
+================ CONTEXTO ================
+
+{contexto}
+
+==========================================
+
+Pergunta do viajante:
+{pergunta}
+
+REGRAS IMPORTANTES:
+- Responda diretamente a pergunta, com orientacao pratica
+- Quando fizer sentido, organize por roteiro, epoca, deslocamento, custo relativo, riscos e proximos passos
+- Nao descreva metadados nem estrutura interna dos documentos
+- Nao invente informacoes
+- Se a resposta nao estiver no contexto, diga isso claramente e recomende verificacao atual
+- Para precos, horarios, disponibilidade, regras recentes e eventos, indique que e preciso consultar fonte atual
+- Responda em portugues do Brasil
+- Cite paginas ou trechos da base quando possivel
+"""
 
 
 # ---------- Loop de chat ----------
 if __name__ == "__main__":
     conversation_history = load_conversation_history()
 
-    print("Assistente pronto. Digite sua pergunta (ou 'sair' para encerrar).\n")
+    print("AmazonIA Travel pronta. Digite sua pergunta (ou 'sair' para encerrar).\n")
     while True:
         try:
-            pergunta = input("Você: ").strip()
+            pergunta = input("Voce: ").strip()
         except (EOFError, KeyboardInterrupt):
             print("\nEncerrando.")
             break
@@ -277,47 +311,16 @@ if __name__ == "__main__":
             break
         if pergunta.lower().startswith("/voz "):
             audio_path = pergunta[5:].strip().strip('"')
-            print("\nAssistente:\n")
+            print("\nAmazonIA Travel:\n")
             print(responder_comando_de_voz(audio_path))
             print("\n")
             continue
 
-        # ---------- Retrieval manual ----------
         contexto = buscar_contexto(pergunta)
         history_text = build_history_text(conversation_history)
-        history_section = (
-            f"Histórico da conversa anterior:\n{history_text}\n\n" if history_text else ""
-        )
+        prompt = build_travel_prompt(pergunta, contexto, history_text)
 
-        # ---------- Prompt manual ----------
-        prompt = f"""
-Você é um assistente acadêmico especializado em responder perguntas
-com base em documentos científicos.
-
-{history_section}Use APENAS o contexto abaixo para responder.
-
-================ CONTEXTO ================
-
-{contexto}
-
-==========================================
-
-Pergunta:
-{pergunta}
-
-REGRAS IMPORTANTES:
-- Responda diretamente à pergunta
-- NÃO descreva os documentos
-- NÃO explique metadados
-- NÃO diga "o conjunto de dados parece..."
-- NÃO descreva estrutura JSON
-- NÃO invente informações
-- Se a resposta não estiver no contexto, diga isso claramente
-- Responda em português do Brasil
-- Cite os autores e trabalhos quando possível
-"""
-
-        print("\nAssistente:\n")
+        print("\nAmazonIA Travel:\n")
 
         response = agent.run(
             prompt,
