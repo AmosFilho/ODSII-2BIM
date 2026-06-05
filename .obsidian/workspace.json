@@ -11,10 +11,14 @@
             "id": "b37a82f1096ff208",
             "type": "leaf",
             "state": {
-              "type": "graph",
-              "state": {},
-              "icon": "lucide-git-fork",
-              "title": "Visualização em gráfico"
+              "type": "markdown",
+              "state": {
+                "file": "overviews.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "overviews"
             }
           }
         ]
@@ -179,8 +183,20 @@
       "bases:Criar nova base": false
     }
   },
-  "active": "b37a82f1096ff208",
+  "active": "4d722d10db0ebb1d",
   "lastOpenFiles": [
+    "tmp/chromadb/chroma.sqlite3-journal",
+    "__pycache__/wiki_engine.cpython-312.pyc",
+    "wiki_engine.py",
+    "README.md",
+    "raw_sources/Prot-tipo-de-Jogo-Sustentabilidade---Wireframe-cc-Premium17199545746911719954575.pdf",
+    "raw_sources/Exercícios Aula Invertida Heskell-AmósDCMFilho.pdf",
+    "scripts/generate_wiki_openclaude.py",
+    "scripts",
+    "run-openclaude.ps1",
+    "init-env.ps1",
+    "__pycache__/wiki_processor.cpython-312.pyc",
+    "wiki_processor.py",
     "overviews.md",
     "wiki/concepts/amazonas-travel-planning.md",
     "wiki/overviews/amazonas-tourism-overview.md",
