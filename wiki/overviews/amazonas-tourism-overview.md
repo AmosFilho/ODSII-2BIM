@@ -26,6 +26,13 @@ O Amazonas atende perfis variados:
 - Cultura: museus, gastronomia amazonense, comunidades ribeirinhas e patrimonio historico.
 - Viagem tecnica ou educacional: biodiversidade, bioeconomia, comunidades tradicionais e sustentabilidade.
 
+## Ver também
+
+- [Destinos do Amazonas](../entities/amazonas-destinations.md) — detalhes sobre Manaus, Presidente Figueiredo, Parintins e outros destinos.
+- [Experiências de Viagem](../entities/amazonas-travel-experiences.md) — tipos de experiências: aventura, cultural, gastronômico, científico.
+- [Planejamento de Viagem](../concepts/amazonas-travel-planning.md) — logística, época, segurança, saúde e sustentabilidade.
+- [Roteiros Sintetizados](../synthesis/amazonas-itineraries.md) — roteiros prontos de 3 a 7 dias no Amazonas.
+
 ## Limites da base
 
 A wiki oferece conhecimento estruturado para raciocinio e planejamento. Informacoes como valores, horarios de barcos, condicoes de estrada, regras de visita, disponibilidade de guias, agenda cultural e alertas meteorologicos devem ser verificadas em fontes atuais.

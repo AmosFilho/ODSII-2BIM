@@ -29,3 +29,10 @@ E indicado para quem tem mais dias disponiveis e quer reduzir o ritmo, com foco 
 Iranduba e Manacapuru podem compor roteiros proximos a Manaus, especialmente para experiencias de rio, gastronomia, hospedagens, natureza e cultura local. A ponte sobre o Rio Negro facilita parte dos deslocamentos terrestres desde Manaus.
 
 Esses destinos funcionam bem para escapadas curtas, bate-volta ou extensoes de roteiro. Ainda assim, cada atrativo deve ser verificado quanto a acesso, horario e disponibilidade.
+
+## Ver também
+
+- [Visão Geral do Turismo](../overviews/amazonas-tourism-overview.md) — panorama geral do turismo no Amazonas.
+- [Experiências de Viagem](./amazonas-travel-experiences.md) — tipos de experiências disponíveis na região.
+- [Planejamento de Viagem](../concepts/amazonas-travel-planning.md) — como planejar logística, época e segurança.
+- [Roteiros Sintetizados](../synthesis/amazonas-itineraries.md) — roteiros prontos que incluem esses destinos.

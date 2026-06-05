@@ -41,3 +41,10 @@ Esse roteiro exige melhor planejamento logistico, mas entrega mais diversidade d
 Para familias, reduzir trilhas longas e priorizar conforto. Para aventureiros, incluir cachoeiras, pernoite ou trilhas com guia. Para viajantes culturais, ampliar tempo em Manaus, mercados, museus, gastronomia e comunidades. Para viagem curta, evitar deslocamentos remotos.
 
 Todos os roteiros devem ser validados com clima, disponibilidade, operador local e condicoes atualizadas.
+
+## Ver também
+
+- [Visão Geral do Turismo](../overviews/amazonas-tourism-overview.md) — panorama geral do turismo no Amazonas.
+- [Destinos do Amazonas](../entities/amazonas-destinations.md) — detalhes de cada destino incluído nos roteiros.
+- [Experiências de Viagem](../entities/amazonas-travel-experiences.md) — tipos de experiências que compõem os roteiros.
+- [Planejamento de Viagem](../concepts/amazonas-travel-planning.md) — logística, época e preparação para executar os roteiros.

@@ -30,6 +30,13 @@ Antes de montar roteiro, a IA deve considerar:
 - Mobilidade, idade e restricoes de saude
 - Preferencia por bate-volta, lodge, barco ou hospedagem urbana
 
+## Ver também
+
+- [Visão Geral do Turismo](../overviews/amazonas-tourism-overview.md) — panorama geral do turismo no Amazonas.
+- [Destinos do Amazonas](../entities/amazonas-destinations.md) — destinos com detalhes de acesso e logística.
+- [Experiências de Viagem](../entities/amazonas-travel-experiences.md) — tipos de experiências e perfis de viajante.
+- [Roteiros Sintetizados](../synthesis/amazonas-itineraries.md) — roteiros prontos que aplicam esses conceitos de planejamento.
+
 ## O que exige verificacao atual
 
 Precos, horarios de barcos, disponibilidade de hospedagem, condicoes de estrada, funcionamento de atrativos, autorizacoes, regras de unidades de conservacao, agenda de eventos e alertas climaticos devem ser verificados em fontes atuais.

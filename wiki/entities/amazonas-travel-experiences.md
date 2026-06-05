@@ -27,3 +27,10 @@ Recomendacoes devem favorecer beneficios locais, seguranca, menor impacto ambien
 ## Viagens educacionais e tecnicas
 
 O Amazonas tambem e adequado para roteiros educacionais sobre biodiversidade, clima, bioeconomia, patrimonio cultural, povos e comunidades tradicionais, gestao ambiental e desenvolvimento regional. Esse tipo de viagem exige curadoria, autorizacoes quando necessario e mediacao especializada.
+
+## Ver também
+
+- [Visão Geral do Turismo](../overviews/amazonas-tourism-overview.md) — panorama geral do turismo no Amazonas.
+- [Destinos do Amazonas](./amazonas-destinations.md) — destinos onde essas experiências acontecem.
+- [Planejamento de Viagem](../concepts/amazonas-travel-planning.md) — logística, época e preparação para cada tipo de experiência.
+- [Roteiros Sintetizados](../synthesis/amazonas-itineraries.md) — roteiros que combinam múltiplas experiências.

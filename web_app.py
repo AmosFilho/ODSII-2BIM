@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Request, File, UploadFile
+from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from pathlib import Path
@@ -7,6 +8,15 @@ import shutil
 from agent import SESSION_ID, agent, knowledge
 from agent import build_history_text, build_travel_prompt, buscar_contexto
 from agent import load_conversation_history, save_conversation_history
+
+from wiki_engine import (
+    list_wiki_pages,
+    get_page_content,
+    search_wiki,
+    find_related_pages,
+    build_wiki_index_data,
+    render_markdown_to_html,
+)
 
 app = FastAPI(title="AmazonIA Travel")
 app.add_middleware(
@@ -48,8 +58,45 @@ def index() -> HTMLResponse:
       color: var(--ink);
     }
 
+    /* ── Tab navigation ──────────────────────────────── */
+    .tab-bar {
+      display: flex;
+      background: var(--forest);
+      border-bottom: 2px solid rgba(255,255,255,0.1);
+      padding: 0 28px;
+    }
+
+    .tab-btn {
+      padding: 14px 24px;
+      color: rgba(255,255,255,0.65);
+      background: none;
+      border: none;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      border-bottom: 3px solid transparent;
+      transition: color 0.2s, border-color 0.2s;
+    }
+
+    .tab-btn:hover { color: #fff; }
+
+    .tab-btn.active {
+      color: var(--sun);
+      border-bottom-color: var(--sun);
+    }
+
+    .panel { display: none; }
+    .panel.active { display: flex; }
+
+    /* ── Chat layout ─────────────────────────────────── */
     .shell {
       min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .chat-layout {
+      flex: 1;
       display: grid;
       grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
     }
@@ -280,8 +327,220 @@ def index() -> HTMLResponse:
       display: block;
     }
 
+    /* ── Wiki layout ─────────────────────────────────── */
+    .wiki-layout {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 260px minmax(0, 1fr);
+      min-height: 0;
+    }
+
+    .wiki-sidebar {
+      background: var(--leaf);
+      border-right: 1px solid var(--line);
+      padding: 20px;
+      overflow-y: auto;
+    }
+
+    .wiki-sidebar h3 {
+      margin: 0 0 12px;
+      font-size: 14px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--forest);
+    }
+
+    .wiki-search-box {
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      font-size: 14px;
+      margin-bottom: 16px;
+      background: #fff;
+    }
+
+    .wiki-category {
+      margin-bottom: 16px;
+    }
+
+    .wiki-category-title {
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 6px;
+      letter-spacing: 0.3px;
+    }
+
+    .wiki-page-link {
+      display: block;
+      padding: 6px 8px;
+      color: var(--ink);
+      text-decoration: none;
+      font-size: 14px;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    .wiki-page-link:hover {
+      background: rgba(22, 75, 53, 0.08);
+    }
+
+    .wiki-page-link.active {
+      background: var(--forest);
+      color: #fff;
+    }
+
+    .wiki-main {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      overflow: hidden;
+    }
+
+    .wiki-toolbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 14px 28px;
+      border-bottom: 1px solid var(--line);
+      background: #fff;
+    }
+
+    .wiki-toolbar-title {
+      font-weight: 700;
+      font-size: 18px;
+      color: var(--forest);
+    }
+
+    .wiki-toolbar-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .wiki-toolbar-actions button {
+      padding: 8px 14px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fff;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--forest);
+      transition: background 0.15s;
+    }
+
+    .wiki-toolbar-actions button:hover {
+      background: var(--leaf);
+    }
+
+    .wiki-content-area {
+      flex: 1;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 220px;
+      overflow: hidden;
+    }
+
+    .wiki-body {
+      padding: 28px;
+      overflow-y: auto;
+    }
+
+    .wiki-body h1 { font-size: 26px; margin-top: 0; }
+    .wiki-body h2 { font-size: 20px; color: var(--forest); border-bottom: 1px solid var(--line); padding-bottom: 6px; }
+    .wiki-body h3 { font-size: 16px; color: var(--river); }
+    .wiki-body p { line-height: 1.6; }
+    .wiki-body ul, .wiki-body ol { line-height: 1.8; }
+    .wiki-body a { color: var(--river); }
+    .wiki-body code {
+      background: var(--leaf);
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-size: 14px;
+    }
+    .wiki-body pre {
+      background: #1a2e23;
+      color: #dcebd2;
+      padding: 14px;
+      border-radius: 6px;
+      overflow-x: auto;
+    }
+    .wiki-body pre code { background: none; padding: 0; color: inherit; }
+    .wiki-body table {
+      border-collapse: collapse;
+      width: 100%;
+      margin: 12px 0;
+    }
+    .wiki-body th, .wiki-body td {
+      border: 1px solid var(--line);
+      padding: 8px 12px;
+      text-align: left;
+    }
+    .wiki-body th { background: var(--leaf); }
+
+    .wiki-toc {
+      padding: 20px;
+      border-left: 1px solid var(--line);
+      overflow-y: auto;
+      background: var(--paper);
+    }
+
+    .wiki-toc h4 {
+      margin: 0 0 10px;
+      font-size: 13px;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .wiki-toc a {
+      display: block;
+      padding: 4px 0;
+      font-size: 13px;
+      color: var(--river);
+      text-decoration: none;
+      line-height: 1.4;
+    }
+
+    .wiki-toc a:hover { text-decoration: underline; }
+    .wiki-toc .toc-h2 { padding-left: 0; }
+    .wiki-toc .toc-h3 { padding-left: 12px; font-size: 12px; }
+
+    .wiki-empty {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      color: var(--muted);
+      text-align: center;
+      padding: 40px;
+    }
+
+    .wiki-empty h2 { color: var(--forest); margin-bottom: 8px; }
+
+    .wiki-related {
+      margin-top: 28px;
+      padding-top: 16px;
+      border-top: 1px solid var(--line);
+    }
+
+    .wiki-related h3 { font-size: 16px; color: var(--forest); }
+
+    .wiki-related a {
+      display: block;
+      padding: 4px 0;
+      color: var(--river);
+      font-size: 14px;
+    }
+
     @media (max-width: 820px) {
-      .shell { grid-template-columns: 1fr; }
+      .chat-layout { grid-template-columns: 1fr; }
+      .wiki-layout { grid-template-columns: 1fr; }
+      .wiki-sidebar { display: none; }
+      .wiki-content-area { grid-template-columns: 1fr; }
+      .wiki-toc { display: none; }
       .sidebar { padding: 20px; }
       .main { padding: 20px; }
       header { flex-direction: column; }
@@ -292,48 +551,103 @@ def index() -> HTMLResponse:
   </style>
 </head>
 <body>
-  <div class="shell">
-    <aside class="sidebar">
-      <div class="brand">
-        <div class="mark">AM</div>
-        <div>AmazonIA Travel</div>
-      </div>
-      <p>IA vertical com RAG para consultar uma wiki de turismo, montar roteiros e apoiar decisões de viagem no Amazonas.</p>
-      <div class="quick">
-        <button data-prompt="Monte um roteiro de 5 dias em Manaus e arredores para primeira viagem.">Roteiro de 5 dias</button>
-        <button data-prompt="Qual a melhor epoca para ver rios, floresta e comunidades ribeirinhas?">Melhor epoca</button>
-        <button data-prompt="Quais cuidados devo ter para turismo de selva no Amazonas?">Cuidados na selva</button>
-      </div>
-    </aside>
+  <nav class="tab-bar">
+    <button class="tab-btn active" data-tab="chat">💬 Chat</button>
+    <button class="tab-btn" data-tab="wiki">📚 Wiki</button>
+  </nav>
 
-    <main class="main">
-      <header>
-        <div>
-          <h1>Consultor inteligente para viagens ao Amazonas</h1>
-          <p class="subtitle">Pergunte sobre destinos, logistica, epocas do ano, experiencias culturais, seguranca e planejamento responsavel.</p>
+  <!-- ── Chat Panel ─────────────────────────────────────────────── -->
+  <div id="chat-panel" class="panel active">
+    <div class="chat-layout">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="mark">AM</div>
+          <div>AmazonIA Travel</div>
         </div>
-        <div class="badge">Base local + consulta atual quando necessario</div>
-      </header>
+        <p>IA vertical com RAG para consultar uma wiki de turismo, montar roteiros e apoiar decisões de viagem no Amazonas.</p>
+        <div class="quick">
+          <button data-prompt="Monte um roteiro de 5 dias em Manaus e arredores para primeira viagem.">Roteiro de 5 dias</button>
+          <button data-prompt="Qual a melhor epoca para ver rios, floresta e comunidades ribeirinhas?">Melhor epoca</button>
+          <button data-prompt="Quais cuidados devo ter para turismo de selva no Amazonas?">Cuidados na selva</button>
+        </div>
+      </aside>
 
-      <div id="chat" class="chat-window"></div>
+      <main class="main">
+        <header>
+          <div>
+            <h1>Consultor inteligente para viagens ao Amazonas</h1>
+            <p class="subtitle">Pergunte sobre destinos, logistica, epocas do ano, experiencias culturais, seguranca e planejamento responsavel.</p>
+          </div>
+          <div class="badge">Base local + consulta atual quando necessario</div>
+        </header>
 
-      <div class="upload-section" id="uploadZone">
-        <p>📄 Arrastar arquivos aqui ou clicar para selecionar</p>
-        <small>PDF, TXT ou MD (máx. 10 MB)</small>
-        <input type="file" id="fileInput" accept=".pdf,.txt,.md" />
-        <div class="upload-feedback" id="uploadFeedback"></div>
+        <div id="chat" class="chat-window"></div>
+
+        <div class="upload-section" id="uploadZone">
+          <p>📄 Arrastar arquivos aqui ou clicar para selecionar</p>
+          <small>PDF, TXT ou MD (máx. 10 MB)</small>
+          <input type="file" id="fileInput" accept=".pdf,.txt,.md" />
+          <div class="upload-feedback" id="uploadFeedback"></div>
+        </div>
+
+        <div class="controls">
+          <input id="message" type="text" placeholder="Ex.: Quero um roteiro com natureza, cultura e pouco deslocamento..." autocomplete="off" />
+          <button id="voiceBtn" class="action secondary">Voz</button>
+          <button id="sendBtn" class="action">Enviar</button>
+        </div>
+        <div class="footer">A resposta usa a wiki local como fonte principal. Precos, horarios e disponibilidade devem ser verificados em fonte atual.</div>
+      </main>
+    </div>
+  </div>
+
+  <!-- ── Wiki Panel ─────────────────────────────────────────────── -->
+  <div id="wiki-panel" class="panel">
+    <div class="wiki-layout">
+      <aside class="wiki-sidebar" id="wikiSidebar">
+        <h3>📚 Wiki</h3>
+        <input type="text" class="wiki-search-box" id="wikiSearch" placeholder="Buscar páginas..." />
+        <div id="wikiTree"></div>
+      </aside>
+
+      <div class="wiki-main">
+        <div class="wiki-toolbar" id="wikiToolbar" style="display:none;">
+          <span class="wiki-toolbar-title" id="wikiPageTitle"></span>
+          <div class="wiki-toolbar-actions">
+            <button id="wikiAskBtn">🤖 Perguntar sobre esta página</button>
+          </div>
+        </div>
+
+        <div class="wiki-content-area">
+          <div class="wiki-body" id="wikiBody">
+            <div class="wiki-empty">
+              <h2>📚 Wiki do Amazonas</h2>
+              <p>Selecione uma página na sidebar para navegar pela base de conhecimento.<br>Use a busca para encontrar tópicos específicos.</p>
+            </div>
+          </div>
+          <aside class="wiki-toc" id="wikiToc" style="display:none;">
+            <h4>Nesta página</h4>
+            <div id="wikiTocContent"></div>
+          </aside>
+        </div>
       </div>
-
-      <div class="controls">
-        <input id="message" type="text" placeholder="Ex.: Quero um roteiro com natureza, cultura e pouco deslocamento..." autocomplete="off" />
-        <button id="voiceBtn" class="action secondary">Voz</button>
-        <button id="sendBtn" class="action">Enviar</button>
-      </div>
-      <div class="footer">A resposta usa a wiki local como fonte principal. Precos, horarios e disponibilidade devem ser verificados em fonte atual.</div>
-    </main>
+    </div>
   </div>
 
   <script>
+    // ── Tab switching ──────────────────────────────────────────
+    const tabBtns = document.querySelectorAll('.tab-btn');
+    const panels = document.querySelectorAll('.panel');
+
+    tabBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        tabBtns.forEach(b => b.classList.remove('active'));
+        panels.forEach(p => p.classList.remove('active'));
+        btn.classList.add('active');
+        document.getElementById(btn.dataset.tab + '-panel').classList.add('active');
+      });
+    });
+
+    // ── Chat ───────────────────────────────────────────────────
     const chat = document.getElementById('chat');
     const messageInput = document.getElementById('message');
     const sendBtn = document.getElementById('sendBtn');
@@ -452,7 +766,7 @@ def index() -> HTMLResponse:
 
     const handleFiles = async (files) => {
       for (let file of files) {
-        if (!['application/pdf', 'text/plain', 'text/markdown'].includes(file.type) && 
+        if (!['application/pdf', 'text/plain', 'text/markdown'].includes(file.type) &&
             !file.name.endsWith('.txt') && !file.name.endsWith('.md') && !file.name.endsWith('.pdf')) {
           showFeedback('Apenas PDF, TXT e MD são aceitos.', false);
           continue;
@@ -484,6 +798,154 @@ def index() -> HTMLResponse:
         showFeedback('Erro ao enviar arquivo: ' + error.message, false);
       }
     };
+
+    // ── Wiki ───────────────────────────────────────────────────
+    const wikiTree = document.getElementById('wikiTree');
+    const wikiBody = document.getElementById('wikiBody');
+    const wikiToolbar = document.getElementById('wikiToolbar');
+    const wikiPageTitle = document.getElementById('wikiPageTitle');
+    const wikiToc = document.getElementById('wikiToc');
+    const wikiTocContent = document.getElementById('wikiTocContent');
+    const wikiSearch = document.getElementById('wikiSearch');
+    const wikiAskBtn = document.getElementById('wikiAskBtn');
+
+    let currentWikiPage = null;
+    let wikiData = null;
+
+    // Load wiki tree
+    const loadWikiTree = async () => {
+      try {
+        const res = await fetch('/wiki/');
+        wikiData = await res.json();
+        renderWikiTree(wikiData);
+      } catch (e) {
+        wikiTree.innerHTML = '<p style="color:var(--muted);font-size:13px;">Erro ao carregar wiki.</p>';
+      }
+    };
+
+    const renderWikiTree = (data) => {
+      let html = '';
+      for (const [cat, pages] of Object.entries(data)) {
+        html += `<div class="wiki-category">`;
+        html += `<div class="wiki-category-title">${cat}</div>`;
+        for (const page of pages) {
+          html += `<a class="wiki-page-link" data-cat="${cat}" data-slug="${page.slug}" data-file="${page.file}">${page.title}</a>`;
+        }
+        html += `</div>`;
+      }
+      wikiTree.innerHTML = html;
+
+      // Bind click events
+      wikiTree.querySelectorAll('.wiki-page-link').forEach(link => {
+        link.addEventListener('click', () => openWikiPage(link.dataset.cat, link.dataset.slug, link.dataset.file));
+      });
+    };
+
+    const openWikiPage = async (cat, slug, file) => {
+      // Update active state
+      wikiTree.querySelectorAll('.wiki-page-link').forEach(l => l.classList.remove('active'));
+      const activeLink = wikiTree.querySelector(`[data-slug="${slug}"]`);
+      if (activeLink) activeLink.classList.add('active');
+
+      try {
+        const res = await fetch(`/wiki/${cat}/${slug}`);
+        const page = await res.json();
+
+        currentWikiPage = file;
+        wikiPageTitle.textContent = page.title;
+        wikiToolbar.style.display = 'flex';
+        wikiBody.innerHTML = page.html;
+
+        // Render TOC
+        if (page.toc_items && page.toc_items.length > 0) {
+          wikiToc.style.display = 'block';
+          let tocHtml = '';
+          for (const item of page.toc_items) {
+            const cls = item.level === 2 ? 'toc-h2' : 'toc-h3';
+            tocHtml += `<a href="#${item.anchor}" class="${cls}">${item.title}</a>`;
+          }
+          wikiTocContent.innerHTML = tocHtml;
+        } else {
+          wikiToc.style.display = 'none';
+        }
+
+        // Load related pages
+        await loadRelatedPages(cat, slug);
+
+        // Bind clicks on related links
+        wikiBody.querySelectorAll('.wiki-related .wiki-page-link').forEach(link => {
+          link.addEventListener('click', (e) => {
+            e.preventDefault();
+            openWikiPage(link.dataset.cat, link.dataset.slug, link.dataset.file);
+          });
+        });
+
+        // Scroll to top
+        wikiBody.scrollTop = 0;
+      } catch (e) {
+        wikiBody.innerHTML = '<div class="wiki-empty"><p>Erro ao carregar página.</p></div>';
+      }
+    };
+
+    const loadRelatedPages = async (cat, slug) => {
+      try {
+        const res = await fetch(`/wiki/related/${cat}/${slug}`);
+        const data = await res.json();
+        if (data.related && data.related.length > 0) {
+          let html = '<div class="wiki-related"><h3>Páginas relacionadas</h3>';
+          for (const r of data.related) {
+            html += `<a class="wiki-page-link" data-cat="${r.category}" data-slug="${r.slug}" data-file="${r.file}">${r.title}</a>`;
+          }
+          html += '</div>';
+          wikiBody.insertAdjacentHTML('beforeend', html);
+        }
+      } catch (e) { /* ignore */ }
+    };
+
+    // Wiki search
+    let searchTimeout = null;
+    wikiSearch.addEventListener('input', () => {
+      clearTimeout(searchTimeout);
+      searchTimeout = setTimeout(async () => {
+        const q = wikiSearch.value.trim();
+        if (!q) {
+          renderWikiTree(wikiData);
+          return;
+        }
+        try {
+          const res = await fetch(`/wiki/search?q=${encodeURIComponent(q)}`);
+          const data = await res.json();
+          if (data.results.length === 0) {
+            wikiTree.innerHTML = '<p style="color:var(--muted);font-size:13px;">Nenhum resultado.</p>';
+          } else {
+            let html = '<div class="wiki-category"><div class="wiki-category-title">Resultados</div>';
+            for (const r of data.results) {
+              html += `<a class="wiki-page-link" data-cat="${r.category}" data-slug="${r.slug}" data-file="${r.file}">${r.title}</a>`;
+            }
+            html += '</div>';
+            wikiTree.innerHTML = html;
+            wikiTree.querySelectorAll('.wiki-page-link').forEach(link => {
+              link.addEventListener('click', () => openWikiPage(link.dataset.cat, link.dataset.slug, link.dataset.file));
+            });
+          }
+        } catch (e) { /* ignore */ }
+      }, 300);
+    });
+
+    // Ask about page
+    wikiAskBtn.addEventListener('click', () => {
+      if (!currentWikiPage) return;
+      // Switch to chat tab and pre-fill
+      tabBtns.forEach(b => b.classList.remove('active'));
+      panels.forEach(p => p.classList.remove('active'));
+      tabBtns[0].classList.add('active');
+      document.getElementById('chat-panel').classList.add('active');
+      messageInput.value = `Sobre a página "${wikiPageTitle.textContent}": `;
+      messageInput.focus();
+    });
+
+    // Init
+    loadWikiTree();
   </script>
 </body>
 </html>
@@ -568,6 +1030,102 @@ async def upload_file(file: UploadFile = File(...)) -> JSONResponse:
             {"detail": f"Erro ao processar arquivo: {str(e)}"},
             status_code=500,
         )
+
+
+# ── Wiki endpoints ─────────────────────────────────────────────────────────────
+
+@app.get("/wiki/")
+def wiki_tree() -> JSONResponse:
+    """Retorna árvore de categorias e páginas da wiki."""
+    tree = list_wiki_pages()
+    return JSONResponse(tree)
+
+
+@app.get("/wiki/index")
+def wiki_index() -> JSONResponse:
+    """Retorna índice completo da wiki como JSON."""
+    data = build_wiki_index_data()
+    return JSONResponse(data)
+
+
+@app.get("/wiki/search")
+def wiki_search(q: str = "") -> JSONResponse:
+    """Busca páginas da wiki por título ou conteúdo."""
+    if not q.strip():
+        return JSONResponse({"results": [], "query": q})
+    results = search_wiki(q)
+    return JSONResponse({"results": results, "query": q})
+
+
+@app.get("/wiki/{category}/{slug}")
+def wiki_page(category: str, slug: str) -> JSONResponse:
+    """Retorna conteúdo renderizado de uma página da wiki."""
+    page = get_page_content(category, slug)
+    if page is None:
+        return JSONResponse({"detail": "Página não encontrada."}, status_code=404)
+    return JSONResponse(page)
+
+
+@app.get("/wiki/related/{category}/{slug}")
+def wiki_related(category: str, slug: str) -> JSONResponse:
+    """Retorna páginas relacionadas a uma dada página."""
+    related = find_related_pages(category, slug)
+    return JSONResponse({"related": related})
+
+
+class WikiAskRequest(BaseModel):
+    page: str = ""
+    question: str = ""
+
+
+@app.post("/wiki/ask")
+def wiki_ask(req: WikiAskRequest) -> JSONResponse:
+    """
+    Pergunta sobre uma página específica da wiki.
+    Usa o conteúdo da página como contexto prioritário para o LLM.
+    """
+    question = req.question.strip()
+    if not question:
+        return JSONResponse({"answer": "Por favor, envie uma pergunta válida."}, status_code=400)
+
+    # Busca contexto da página específica se informada
+    page_context = ""
+    if req.page:
+        parts = req.page.split("/", 1)
+        if len(parts) == 2:
+            page_data = get_page_content(parts[0], parts[1])
+            if page_data:
+                page_context = f"\n\n--- Conteúdo da página '{page_data['title']}' ---\n{page_data['markdown']}\n--- Fim da página ---\n"
+
+    # Busca contexto adicional via RAG
+    rag_context = buscar_contexto(question)
+
+    # Combina contextos
+    combined_context = ""
+    if page_context:
+        combined_context += page_context
+    if rag_context:
+        combined_context += f"\n\n--- Contexto adicional da base ---\n{rag_context}"
+
+    conversation_history = load_conversation_history()
+    history_text = build_history_text(conversation_history)
+
+    prompt = build_travel_prompt(question, combined_context, history_text)
+
+    result = agent.run(
+        prompt,
+        session_id=SESSION_ID,
+        add_history_to_context=True,
+        add_session_state_to_context=True,
+        stream=False,
+    )
+
+    answer = result.content if result.content is not None else ""
+    conversation_history.append({"role": "user", "content": f"[Wiki] {question}"})
+    conversation_history.append({"role": "assistant", "content": answer})
+    save_conversation_history(conversation_history)
+
+    return JSONResponse({"answer": answer, "page": req.page})
 
 
 if __name__ == "__main__":
