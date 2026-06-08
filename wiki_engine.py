@@ -93,6 +93,14 @@ def _slug_to_title(slug: str) -> str:
     return slug.replace("-", " ").replace("_", " ").title()
 
 
+def _extract_h1_title(body: str) -> str | None:
+    """Extrai o primeiro heading H1 do corpo markdown."""
+    match = re.search(r"^#\s+(.+)$", body.strip(), re.MULTILINE)
+    if match:
+        return match.group(1).strip()
+    return None
+
+
 def list_wiki_pages() -> dict[str, list[dict[str, Any]]]:
     """
     Escaneia wiki/ e retorna árvore de categorias → páginas.
@@ -111,7 +119,7 @@ def list_wiki_pages() -> dict[str, list[dict[str, Any]]]:
             slug = md_file.stem
             raw = md_file.read_text(encoding="utf-8")
             meta, body = _parse_frontmatter(raw)
-            title = meta.get("title", _slug_to_title(slug))
+            title = meta.get("title") or _extract_h1_title(body) or _slug_to_title(slug)
             summary = extract_page_summary(body)
             pages.append(
                 {
@@ -139,7 +147,7 @@ def get_page_content(category: str, slug: str) -> dict[str, Any] | None:
     raw = md_path.read_text(encoding="utf-8")
     meta, body = _parse_frontmatter(raw)
     html, toc = render_markdown_to_html(body)
-    title = meta.get("title", _slug_to_title(slug))
+    title = meta.get("title") or _extract_h1_title(body) or _slug_to_title(slug)
     summary = extract_page_summary(body)
 
     return {

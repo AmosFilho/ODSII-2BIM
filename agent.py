@@ -36,7 +36,7 @@ except ImportError:
     OpenAI = None  # type: ignore[assignment]
 
 # ---------- Configuracao ----------
-LOAD_DOCS = True
+LOAD_DOCS = False
 DOCS_PATH = "wiki"
 CHAT_MODEL = "llama3.1:8b"
 EMBED_MODEL = "nomic-embed-text:v1.5"

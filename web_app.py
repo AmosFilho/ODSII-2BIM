@@ -227,6 +227,37 @@ def index() -> HTMLResponse:
       color: var(--ink);
     }
 
+    /* ── Typing indicator ─────────────────────────────── */
+    .typing-indicator {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      padding: 12px 14px;
+    }
+
+    .typing-indicator .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--muted);
+      animation: typing-bounce 1.4s infinite ease-in-out both;
+    }
+
+    .typing-indicator .dot:nth-child(1) { animation-delay: -0.32s; }
+    .typing-indicator .dot:nth-child(2) { animation-delay: -0.16s; }
+    .typing-indicator .dot:nth-child(3) { animation-delay: 0s; }
+
+    @keyframes typing-bounce {
+      0%, 80%, 100% {
+        transform: scale(0.4);
+        opacity: 0.4;
+      }
+      40% {
+        transform: scale(1);
+        opacity: 1;
+      }
+    }
+
     .controls {
       display: grid;
       grid-template-columns: 1fr auto auto;
@@ -666,6 +697,23 @@ def index() -> HTMLResponse:
 
     addMessage('assistant', 'Ola. Sou a AmazonIA Travel. Posso montar roteiros, comparar epocas, sugerir destinos e apontar cuidados para viajar pelo Amazonas.');
 
+    const showTyping = () => {
+      const container = document.createElement('div');
+      container.className = 'message assistant';
+      container.id = 'typingIndicator';
+      const bubble = document.createElement('div');
+      bubble.className = 'bubble typing-indicator';
+      bubble.innerHTML = '<div class="dot"></div><div class="dot"></div><div class="dot"></div>';
+      container.appendChild(bubble);
+      chat.appendChild(container);
+      chat.scrollTop = chat.scrollHeight;
+    };
+
+    const hideTyping = () => {
+      const el = document.getElementById('typingIndicator');
+      if (el) el.remove();
+    };
+
     const sendMessage = async (rawText) => {
       const text = rawText || messageInput.value.trim();
       if (!text) return;
@@ -673,6 +721,7 @@ def index() -> HTMLResponse:
       messageInput.value = '';
       sendBtn.disabled = true;
       voiceBtn.disabled = true;
+      showTyping();
 
       try {
         const response = await fetch('/chat', {
@@ -681,8 +730,10 @@ def index() -> HTMLResponse:
           body: JSON.stringify({ message: text }),
         });
         const data = await response.json();
+        hideTyping();
         addMessage('assistant', data.answer || 'Nao foi possivel obter resposta.');
       } catch (error) {
+        hideTyping();
         addMessage('assistant', 'Erro ao chamar o servidor: ' + error.message);
       } finally {
         sendBtn.disabled = false;
