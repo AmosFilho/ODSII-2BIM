@@ -8,6 +8,7 @@ import shutil
 from agent import SESSION_ID, agent, knowledge
 from agent import build_history_text, build_travel_prompt, buscar_contexto
 from agent import load_conversation_history, save_conversation_history
+from agent import safe_agent_run
 
 from wiki_engine import (
     list_wiki_pages,
@@ -1016,15 +1017,7 @@ async def chat(request: Request) -> JSONResponse:
     contexto = buscar_contexto(message)
     prompt = build_travel_prompt(message, contexto, history_text)
 
-    result = agent.run(
-        prompt,
-        session_id=SESSION_ID,
-        add_history_to_context=True,
-        add_session_state_to_context=True,
-        stream=False,
-    )
-
-    answer = result.content if result.content is not None else ""
+    answer = safe_agent_run(prompt, session_id=SESSION_ID)
     conversation_history.append({"role": "user", "content": message})
     conversation_history.append({"role": "assistant", "content": answer})
     save_conversation_history(conversation_history)

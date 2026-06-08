@@ -292,6 +292,93 @@ REGRAS IMPORTANTES:
 """
 
 
+# ---------- Fallback para tool calls não processados ----------
+def _is_raw_tool_call(text: str) -> bool:
+    """
+    Detecta se o texto parece ser um JSON de tool call não processado
+    (quando o modelo retorna a tool call como texto em vez de executá-la).
+    """
+    if not text:
+        return False
+    stripped = text.strip()
+    # Remove code blocks se presentes
+    if stripped.startswith("```"):
+        lines = stripped.split("\n")
+        stripped = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:]).strip()
+    try:
+        data = json.loads(stripped)
+        if isinstance(data, dict):
+            name = data.get("name", "")
+            params = data.get("parameters", data.get("arguments", {}))
+            if name and isinstance(params, dict):
+                return True
+    except (json.JSONDecodeError, ValueError):
+        pass
+    return False
+
+
+def _extract_search_query_from_tool_call(text: str) -> str:
+    """Extrai a query de busca de um JSON de tool call."""
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        lines = stripped.split("\n")
+        stripped = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:]).strip()
+    try:
+        data = json.loads(stripped)
+        params = data.get("parameters", data.get("arguments", {}))
+        if isinstance(params, dict):
+            return params.get("query", params.get("search", ""))
+    except (json.JSONDecodeError, ValueError):
+        pass
+    return ""
+
+
+def safe_agent_run(prompt: str, session_id: str = SESSION_ID) -> str:
+    """
+    Executa o agente e, se o modelo retornar uma tool call não processada
+    (JSON bruto em vez de resultado), faz fallback: executa a web search
+    diretamente e reenvia ao agente para gerar a resposta final.
+    """
+    result = agent.run(
+        prompt,
+        session_id=session_id,
+        add_history_to_context=False,
+        add_session_state_to_context=False,
+        stream=False,
+    )
+
+    answer = result.content if result.content is not None else ""
+
+    # Se a resposta é uma tool call não processada, faz fallback
+    if _is_raw_tool_call(answer):
+        search_query = _extract_search_query_from_tool_call(answer)
+        if search_query and DuckDuckGoTools is not None:
+            try:
+                ddg = DuckDuckGoTools()
+                search_results = ddg.web_search(query=search_query, max_results=5)
+                if search_results:
+                    web_context = f"\n\n--- Resultados da busca por '{search_query}' ---\n{search_results}"
+                    retry_prompt = (
+                        f"{prompt}\n\n{web_context}\n\n"
+                        "Com base nos resultados da busca acima, responda a pergunta do viajante."
+                    )
+                    retry_result = agent.run(
+                        retry_prompt,
+                        session_id=session_id,
+                        add_history_to_context=False,
+                        add_session_state_to_context=False,
+                        stream=False,
+                    )
+                    answer = retry_result.content if retry_result.content is not None else answer
+            except Exception:
+                answer = (
+                    "Desculpe, não consegui buscar informações atualizadas no momento. "
+                    "Por favor, tente novamente em instantes."
+                )
+
+    return answer
+
+
 # ---------- Loop de chat ----------
 if __name__ == "__main__":
     conversation_history = load_conversation_history()
