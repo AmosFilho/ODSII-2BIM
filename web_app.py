@@ -228,6 +228,83 @@ def index() -> HTMLResponse:
       color: var(--ink);
     }
 
+    /* ── Markdown inside chat bubbles ────────────────────────── */
+    .message.assistant .bubble h1,
+    .message.assistant .bubble h2,
+    .message.assistant .bubble h3,
+    .message.assistant .bubble h4 {
+      margin: 10px 0 6px;
+      line-height: 1.3;
+      color: var(--forest);
+    }
+    .message.assistant .bubble h1 { font-size: 20px; }
+    .message.assistant .bubble h2 { font-size: 17px; }
+    .message.assistant .bubble h3 { font-size: 15px; }
+    .message.assistant .bubble h4 { font-size: 14px; }
+    .message.assistant .bubble p {
+      margin: 6px 0;
+      line-height: 1.5;
+    }
+    .message.assistant .bubble ul,
+    .message.assistant .bubble ol {
+      margin: 6px 0;
+      padding-left: 22px;
+      line-height: 1.6;
+    }
+    .message.assistant .bubble li { margin: 2px 0; }
+    .message.assistant .bubble strong { color: var(--forest); }
+    .message.assistant .bubble a { color: var(--river); text-decoration: underline; }
+    .message.assistant .bubble code {
+      background: rgba(22, 75, 53, 0.12);
+      padding: 1px 5px;
+      border-radius: 3px;
+      font-size: 13px;
+      font-family: 'Courier New', monospace;
+    }
+    .message.assistant .bubble pre {
+      background: #1a2e23;
+      color: #dcebd2;
+      padding: 10px 12px;
+      border-radius: 6px;
+      overflow-x: auto;
+      margin: 8px 0;
+    }
+    .message.assistant .bubble pre code {
+      background: none;
+      padding: 0;
+      color: inherit;
+      font-size: 13px;
+    }
+    .message.assistant .bubble blockquote {
+      border-left: 3px solid var(--forest);
+      margin: 8px 0;
+      padding: 4px 12px;
+      color: var(--muted);
+      font-style: italic;
+    }
+    .message.assistant .bubble table {
+      border-collapse: collapse;
+      width: 100%;
+      margin: 8px 0;
+      font-size: 14px;
+    }
+    .message.assistant .bubble th,
+    .message.assistant .bubble td {
+      border: 1px solid var(--line);
+      padding: 6px 10px;
+      text-align: left;
+    }
+    .message.assistant .bubble th {
+      background: rgba(22, 75, 53, 0.1);
+      font-weight: 700;
+      color: var(--forest);
+    }
+    .message.assistant .bubble hr {
+      border: none;
+      border-top: 1px solid var(--line);
+      margin: 10px 0;
+    }
+
     /* ── Typing indicator ─────────────────────────────── */
     .typing-indicator {
       display: flex;
@@ -665,7 +742,16 @@ def index() -> HTMLResponse:
     </div>
   </div>
 
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <script>
+    // ── Markdown rendering for chat messages ───────────────────
+    if (typeof marked !== 'undefined') {
+      marked.setOptions({
+        breaks: true,
+        gfm: true,
+      });
+    }
+
     // ── Tab switching ──────────────────────────────────────────
     const tabBtns = document.querySelectorAll('.tab-btn');
     const panels = document.querySelectorAll('.panel');
@@ -690,7 +776,11 @@ def index() -> HTMLResponse:
       container.className = `message ${role}`;
       const bubble = document.createElement('div');
       bubble.className = 'bubble';
-      bubble.textContent = text;
+      if (role === 'assistant' && typeof marked !== 'undefined') {
+        bubble.innerHTML = marked.parse(text);
+      } else {
+        bubble.textContent = text;
+      }
       container.appendChild(bubble);
       chat.appendChild(container);
       chat.scrollTop = chat.scrollHeight;
