@@ -687,7 +687,7 @@ def index() -> HTMLResponse:
             <h1>Consultor inteligente para viagens ao Amazonas</h1>
             <p class="subtitle">Pergunte sobre destinos, logistica, epocas do ano, experiencias culturais, seguranca e planejamento responsavel.</p>
           </div>
-          <div class="badge">Base local + consulta atual quando necessario</div>
+          <div class="badge">Base local (Wiki)</div>
         </header>
 
         <div id="chat" class="chat-window"></div>
@@ -701,7 +701,6 @@ def index() -> HTMLResponse:
 
         <div class="controls">
           <input id="message" type="text" placeholder="Ex.: Quero um roteiro com natureza, cultura e pouco deslocamento..." autocomplete="off" />
-          <button id="voiceBtn" class="action secondary">Voz</button>
           <button id="sendBtn" class="action">Enviar</button>
         </div>
         <div class="footer">A resposta usa a wiki local como fonte principal. Precos, horarios e disponibilidade devem ser verificados em fonte atual.</div>
@@ -769,7 +768,6 @@ def index() -> HTMLResponse:
     const chat = document.getElementById('chat');
     const messageInput = document.getElementById('message');
     const sendBtn = document.getElementById('sendBtn');
-    const voiceBtn = document.getElementById('voiceBtn');
 
     const addMessage = (role, text) => {
       const container = document.createElement('div');
@@ -811,7 +809,6 @@ def index() -> HTMLResponse:
       addMessage('user', text);
       messageInput.value = '';
       sendBtn.disabled = true;
-      voiceBtn.disabled = true;
       showTyping();
 
       try {
@@ -828,7 +825,6 @@ def index() -> HTMLResponse:
         addMessage('assistant', 'Erro ao chamar o servidor: ' + error.message);
       } finally {
         sendBtn.disabled = false;
-        voiceBtn.disabled = false;
       }
     };
 
@@ -844,35 +840,7 @@ def index() -> HTMLResponse:
       }
     });
 
-    let recognition = null;
-    if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-      recognition = new SpeechRecognition();
-      recognition.lang = 'pt-BR';
-      recognition.interimResults = false;
-      recognition.maxAlternatives = 1;
 
-      recognition.addEventListener('result', (event) => {
-        const transcript = event.results[0][0].transcript;
-        messageInput.value = transcript;
-        sendMessage(transcript);
-      });
-
-      recognition.addEventListener('end', () => {
-        voiceBtn.textContent = 'Voz';
-        voiceBtn.disabled = false;
-      });
-    } else {
-      voiceBtn.disabled = true;
-      voiceBtn.textContent = 'Sem voz';
-    }
-
-    voiceBtn.addEventListener('click', () => {
-      if (!recognition) return;
-      voiceBtn.disabled = true;
-      voiceBtn.textContent = 'Ouvindo...';
-      recognition.start();
-    });
 
     // Upload de arquivos
     const uploadZone = document.getElementById('uploadZone');
@@ -1118,8 +1086,17 @@ async def chat(request: Request) -> JSONResponse:
 @app.post("/upload")
 async def upload_file(file: UploadFile = File(...)) -> JSONResponse:
     """
-    Endpoint para receber arquivos (PDF, TXT, MD) e adicionar à base de conhecimento.
+    Endpoint para receber arquivos (PDF, TXT, MD), convertê-los em Markdown,
+    comparar embeddings com outras páginas da wiki, atualizar páginas semelhantes,
+    e indexar tanto o novo documento quanto as alterações no banco vetorial.
     """
+    import re
+    import math
+    import pypdf
+    import ollama
+    from agent import vector_db, CHAT_MODEL
+    from wiki_engine import _parse_frontmatter
+
     # Validar extensão
     allowed_extensions = {".pdf", ".txt", ".md"}
     file_ext = Path(file.filename).suffix.lower()
@@ -1147,19 +1124,206 @@ async def upload_file(file: UploadFile = File(...)) -> JSONResponse:
         temp_file_path = raw_sources_dir / file.filename
         with open(temp_file_path, "wb") as f:
             f.write(file_contents)
-        
-        # Adicionar à base de conhecimento
-        knowledge.add_content(path=str(temp_file_path))
-        
+
+        # 1. Transformar em uma página .md
+        extracted_text = ""
+        if file_ext == ".pdf":
+            reader = pypdf.PdfReader(temp_file_path)
+            for page in reader.pages:
+                extracted_text += page.extract_text() or ""
+        else:
+            extracted_text = file_contents.decode("utf-8", errors="ignore")
+
+        # Gerar slug e título
+        stem = Path(file.filename).stem
+        slug = re.sub(r"[^a-zA-ZÀ-ÿ0-9 _-]", "", stem)
+        slug = slug.strip().replace(" ", "-").lower()
+        title = stem.replace("-", " ").replace("_", " ").title()
+
+        # Formatar como markdown
+        if not extracted_text.strip().startswith("#"):
+            markdown_content = f"# {title}\n\n{extracted_text}"
+        else:
+            markdown_content = extracted_text
+
+        # Salvar em wiki/uploads/
+        wiki_uploads_dir = Path("wiki/uploads")
+        wiki_uploads_dir.mkdir(exist_ok=True)
+        new_md_path = wiki_uploads_dir / f"{slug}.md"
+        new_md_path.write_text(markdown_content, encoding="utf-8")
+
+        # 2. Comparar como embedding com outras páginas e buscar a página/referências similares
+        def get_text_embedding(text: str, model: str = "nomic-embed-text:v1.5") -> list[float]:
+            chunk_size = 2000
+            overlap = 200
+            chunks = []
+            start = 0
+            while start < len(text):
+                end = start + chunk_size
+                chunks.append(text[start:end])
+                start += chunk_size - overlap
+                if start >= len(text) or chunk_size - overlap <= 0:
+                    break
+                    
+            if not chunks:
+                chunks = [""]
+                
+            embeddings = []
+            for chunk in chunks:
+                if not chunk.strip():
+                    continue
+                try:
+                    res = ollama.embeddings(model=model, prompt=chunk)
+                    embeddings.append(res["embedding"])
+                except Exception as e:
+                    print(f"Erro ao obter embedding do chunk: {e}")
+                    
+            if not embeddings:
+                # Fallback se todos falharem
+                res = ollama.embeddings(model=model, prompt=text[:1000])
+                return res["embedding"]
+                
+            avg_embedding = [0.0] * len(embeddings[0])
+            for emb in embeddings:
+                for i in range(len(emb)):
+                    avg_embedding[i] += emb[i]
+                    
+            n_embeddings = len(embeddings)
+            for i in range(len(avg_embedding)):
+                avg_embedding[i] /= n_embeddings
+                
+            return avg_embedding
+
+        new_doc_embedding = get_text_embedding(markdown_content)
+
+        # Listar todas as outras páginas da wiki (exceto a recém-criada e index.md)
+        wiki_dir = Path("wiki")
+        other_pages = []
+        for p in wiki_dir.rglob("*.md"):
+            if p.name != "index.md" and p.parent != wiki_dir and p != new_md_path:
+                other_pages.append(p)
+
+        # Calcular similaridade de cosseno
+        def cosine_similarity(v1, v2):
+            sumxx, sumyy, sumxy = 0.0, 0.0, 0.0
+            for i in range(len(v1)):
+                x = v1[i]
+                y = v2[i]
+                sumxx += x*x
+                sumyy += y*y
+                sumxy += x*y
+            if sumxx == 0 or sumyy == 0:
+                return 0.0
+            return sumxy / (math.sqrt(sumxx) * math.sqrt(sumyy))
+
+        similarities = []
+        for page_path in other_pages:
+            try:
+                page_text = page_path.read_text(encoding="utf-8")
+                _, page_body = _parse_frontmatter(page_text)
+                page_embedding = get_text_embedding(page_body)
+                
+                similarity = cosine_similarity(new_doc_embedding, page_embedding)
+                similarities.append({
+                    "path": page_path,
+                    "similarity": similarity,
+                    "body": page_body,
+                    "full_text": page_text
+                })
+            except Exception as e:
+                print(f"Erro ao processar embedding de {page_path}: {e}")
+
+        # Ordenar por similaridade decrescente
+        similarities.sort(key=lambda x: x["similarity"], reverse=True)
+
+        # Escolher quais páginas atualizar (threshold >= 0.5, ou a top 1 caso nenhuma passe do limite)
+        similar_pages_to_update = []
+        if similarities:
+            similar_pages_to_update = [s for s in similarities if s["similarity"] >= 0.5]
+            if not similar_pages_to_update:
+                similar_pages_to_update = [similarities[0]]
+
+        # Limitando a no máximo 3 páginas
+        similar_pages_to_update = similar_pages_to_update[:3]
+
+        updated_page_names = []
+        # 3. Atualizar o conteúdo das páginas semelhantes com a informação do novo documento
+        for sim_page in similar_pages_to_update:
+            page_path = sim_page["path"]
+            page_content = sim_page["full_text"]
+            
+            # Chamar LLM para mesclar informações
+            prompt = f"""
+Você é um editor de conteúdo especializado em turismo no Amazonas.
+Sua tarefa é integrar a informação de um novo documento em uma página existente da nossa Wiki de forma harmoniosa, natural e organizada, mantendo o estilo de formatação Markdown existente.
+
+--- INÍCIO DO NOVO DOCUMENTO ---
+{markdown_content}
+--- FIM DO NOVO DOCUMENTO ---
+
+--- INÍCIO DA PÁGINA EXISTENTE ---
+{page_content}
+--- FIM DA PÁGINA EXISTENTE ---
+
+Instruções importantes:
+1. Integre as informações relevantes do novo documento na página existente sem remover o conteúdo útil já presente.
+2. Evite duplicações. Se alguma informação já existia, mantenha ou enriqueça.
+3. Mantenha os links e referências existentes na página (por exemplo, a seção "Ver também" ou links no formato [Texto](caminho)).
+4. Não invente informações. Use apenas as informações fornecidas no novo documento e na página existente.
+5. Retorne APENAS o conteúdo final da página existente com as novas informações integradas, em formato Markdown. Não inclua os delimitadores (como "--- INÍCIO DA PÁGINA EXISTENTE ---"), comentários, explicações ou blocos de código markdown extras (como ```markdown).
+"""
+            llm_response = ollama.generate(
+                model=CHAT_MODEL,
+                prompt=prompt,
+                options={"temperature": 0.2}
+            )
+            updated_text = llm_response["response"].strip()
+            if updated_text.startswith("```markdown"):
+                updated_text = updated_text[11:].strip()
+            elif updated_text.startswith("```"):
+                updated_text = updated_text[3:].strip()
+            if updated_text.endswith("```"):
+                updated_text = updated_text[:-3].strip()
+
+            # Limpeza preventiva de delimitadores
+            for delimiter in [
+                "--- INÍCIO DA PÁGINA EXISTENTE ---",
+                "--- FIM DA PÁGINA EXISTENTE ---",
+                "--- INÍCIO DO NOVO DOCUMENTO ---",
+                "--- FIM DO NOVO DOCUMENTO ---",
+                "================ PÁGINA EXISTENTE ================",
+                "================ NOVO DOCUMENTO ================",
+                "================================================"
+            ]:
+                updated_text = updated_text.replace(delimiter, "")
+            updated_text = updated_text.strip()
+
+            # Salvar no disco
+            page_path.write_text(updated_text, encoding="utf-8")
+            updated_page_names.append(page_path.name)
+
+            # Atualizar os embeddings da página atualizada no ChromaDB
+            vector_db.delete_by_metadata(metadata={"name": page_path.name})
+            knowledge.add_content(path=str(page_path))
+
+        # 4. Adicionar os embeddings da nova página ao banco vetorial
+        vector_db.delete_by_metadata(metadata={"name": new_md_path.name})
+        knowledge.add_content(path=str(new_md_path))
+
         return JSONResponse(
             {
                 "status": "success",
-                "message": f"Arquivo '{file.filename}' adicionado com sucesso à base de conhecimento.",
-                "file_path": str(temp_file_path),
+                "message": f"Arquivo '{file.filename}' adicionado com sucesso.",
+                "details": {
+                    "new_page": str(new_md_path),
+                    "updated_pages": updated_page_names,
+                }
             },
             status_code=200,
         )
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return JSONResponse(
             {"detail": f"Erro ao processar arquivo: {str(e)}"},
             status_code=500,
