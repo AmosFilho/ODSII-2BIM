@@ -18,5 +18,41 @@
   "linkStrength": 1,
   "linkDistance": 250,
   "scale": 0.71327546262244,
-  "close": true
+  "close": true,
+  "links": {
+    "uploads/amazonas_guia_turistico_digital-ptbr_.md": {
+      "entities/amazonas-destinations.md": 0.8676,
+      "concepts/amazonas-travel-planning.md": 0.8374,
+      "overviews/amazonas-tourism-overview.md": 0.8186,
+      "synthesis/amazonas-itineraries.md": 0.8185,
+      "entities/amazonas-accommodation.md": 0.8178,
+      "entities/amazonas-festivals-events.md": 0.81,
+      "entities/amazonas-gastronomy.md": 0.7976,
+      "entities/amazonas-travel-experiences.md": 0.78
+    },
+    "entities/amazonas-accommodation.md": {
+      "uploads/amazonas_guia_turistico_digital-ptbr_.md": 0.8178
+    },
+    "synthesis/amazonas-itineraries.md": {
+      "uploads/amazonas_guia_turistico_digital-ptbr_.md": 0.8185
+    },
+    "concepts/amazonas-travel-planning.md": {
+      "uploads/amazonas_guia_turistico_digital-ptbr_.md": 0.8374
+    },
+    "entities/amazonas-festivals-events.md": {
+      "uploads/amazonas_guia_turistico_digital-ptbr_.md": 0.81
+    },
+    "entities/amazonas-gastronomy.md": {
+      "uploads/amazonas_guia_turistico_digital-ptbr_.md": 0.7976
+    },
+    "entities/amazonas-travel-experiences.md": {
+      "uploads/amazonas_guia_turistico_digital-ptbr_.md": 0.78
+    },
+    "overviews/amazonas-tourism-overview.md": {
+      "uploads/amazonas_guia_turistico_digital-ptbr_.md": 0.8186
+    },
+    "entities/amazonas-destinations.md": {
+      "uploads/amazonas_guia_turistico_digital-ptbr_.md": 0.8676
+    }
+  }
 }

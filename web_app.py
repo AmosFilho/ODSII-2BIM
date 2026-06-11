@@ -1133,15 +1133,35 @@ def index() -> HTMLResponse:
           wikiToc.style.display = 'none';
         }
 
-        // Load related pages
-        await loadRelatedPages(cat, slug);
-
-        // Bind clicks on related links
-        wikiBody.querySelectorAll('.wiki-related .wiki-page-link').forEach(link => {
-          link.addEventListener('click', (e) => {
-            e.preventDefault();
-            openWikiPage(link.dataset.cat, link.dataset.slug, link.dataset.file);
+        // Load related pages only if not already present in the Markdown content (Obsidian integration)
+        if (!wikiBody.innerHTML.includes('Páginas Relacionadas')) {
+          await loadRelatedPages(cat, slug);
+          
+          // Bind clicks on dynamically loaded related links
+          wikiBody.querySelectorAll('.wiki-related .wiki-page-link').forEach(link => {
+            link.addEventListener('click', (e) => {
+              e.preventDefault();
+              openWikiPage(link.dataset.cat, link.dataset.slug, link.dataset.file);
+            });
           });
+        }
+
+        // Bind clicks on standard relative links inside the markdown body (Obsidian integration)
+        wikiBody.querySelectorAll('a').forEach(link => {
+          const href = link.getAttribute('href');
+          if (href && href.startsWith('../')) {
+            const parts = href.split('/');
+            if (parts.length >= 3) {
+              const rCat = parts[parts.length - 2];
+              const rFile = parts[parts.length - 1];
+              const rSlug = rFile.replace('.md', '');
+              
+              link.addEventListener('click', (e) => {
+                e.preventDefault();
+                openWikiPage(rCat, rSlug, `${rCat}/${rFile}`);
+              });
+            }
+          }
         });
 
         // Scroll to top
@@ -1454,6 +1474,44 @@ Regras:
                 None,
                 lambda: wiki_graph.update_page_relations(page_id, neighbor_entries)
             )
+
+            # Anexa os links das páginas relacionadas no final do novo Markdown para visualização no gráfico do Obsidian
+            if neighbor_entries:
+                links_md = "\n\n## Páginas Relacionadas\n"
+                for neighbor_file, similarity in neighbor_entries.items():
+                    # Tentar extrair o título real do arquivo relacionado para exibição
+                    neighbor_title = neighbor_file.split("/")[-1].replace(".md", "").replace("-", " ").replace("_", " ").title()
+                    try:
+                        n_path = Path("wiki") / neighbor_file
+                        if n_path.is_file():
+                            from wiki_engine import _parse_frontmatter, _extract_h1_title
+                            n_text = n_path.read_text(encoding="utf-8")
+                            meta, body = _parse_frontmatter(n_text)
+                            title_val = meta.get("title") or _extract_h1_title(body)
+                            if title_val:
+                                neighbor_title = title_val
+                    except Exception:
+                        pass
+                    
+                    links_md += f"- [{neighbor_title}](../{neighbor_file})\n"
+
+                # Limpa qualquer seção antiga de relacionados no conteúdo gerado
+                content_to_write = markdown_content
+                if "## Páginas Relacionadas" in content_to_write:
+                    content_to_write = content_to_write.split("## Páginas Relacionadas")[0].strip()
+
+                updated_content = content_to_write + links_md
+                new_md_path.write_text(updated_content, encoding="utf-8")
+
+                # Reindexa o arquivo atualizado com os links para manter o banco vetorial em sincronia
+                await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: vector_db.delete_by_metadata(metadata={"name": new_md_path.name})
+                )
+                await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: knowledge.add_content(path=str(new_md_path))
+                )
 
             push("done", "✓ Concluído!", done=True)
 
