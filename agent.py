@@ -5,6 +5,7 @@ Antes de rodar:
     1. Tenha o Ollama instalado e rodando (https://ollama.com)
     2. Baixe os modelos:
         ollama pull llama3.1:8b
+        ollama pull qwen2.5vl:7b
         ollama pull nomic-embed-text
     3. Instale as dependencias:
         pip install -r requirements.txt
@@ -28,17 +29,17 @@ from agno.vectordb.chroma import ChromaDb, SearchType
 
 
 # ---------- Configuracao ----------
-LOAD_DOCS = False
+LOAD_DOCS = True
 DOCS_PATH = "wiki"
-CHAT_MODEL = "llama3.1:8b"
+CHAT_MODEL = "qwen2.5:7b"
 PREPROCESS_MODEL = "llama3.1:8b"  # Modelo para pré-processamento de documentos
 EMBED_MODEL = "nomic-embed-text:v1.5"
 DB_FILE = "tmp/agent.db"
 SESSION_ID = "amazonas_travel_rag"
 USER_ID = "usuario_local"
-HISTORY_MESSAGES = 20
+HISTORY_MESSAGES = 10
 HISTORY_FILE = "tmp/conversation_history.json"
-MAX_HISTORY_ENTRIES = 10
+MAX_HISTORY_ENTRIES = 5
 os.makedirs("tmp", exist_ok=True)
 
 # ---------- Vector store local (ChromaDB) ----------
@@ -84,7 +85,7 @@ agent = Agent(
     store_history_messages=True,
     add_session_state_to_context=True,
     overwrite_db_session_state=False,
-    num_history_runs=5,
+    num_history_runs=3,
     instructions=[
         "Voce e a AmazonIA Travel, uma IA vertical especializada em turismo e viagens para o Amazonas.",
         "Use a wiki local como fonte principal para destinos, roteiros, clima, logistica, cultura, seguranca e boas praticas.",
