@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "overviews.md",
+                "file": "raw_sources/amazonas-tourism-seed.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "overviews"
+              "title": "amazonas-tourism-seed"
             }
           }
         ]
@@ -185,6 +185,13 @@
   },
   "active": "4d722d10db0ebb1d",
   "lastOpenFiles": [
+    "tmp/agent.db-journal",
+    "wiki/uploads/amazonas_guia_turistico_digital-ptbr_.md",
+    "__pycache__/wiki_graph.cpython-312.pyc",
+    "wiki_graph.py",
+    "raw_sources/www-amazonasemais-com-br-parintins-roteiro-para-voce-curtir-.md",
+    "Base64-Image-Removed.md",
+    "overviews.md",
     "tmp/chromadb/chroma.sqlite3-journal",
     "__pycache__/wiki_engine.cpython-312.pyc",
     "wiki_engine.py",
@@ -194,10 +201,6 @@
     "scripts/generate_wiki_openclaude.py",
     "scripts",
     "run-openclaude.ps1",
-    "init-env.ps1",
-    "__pycache__/wiki_processor.cpython-312.pyc",
-    "wiki_processor.py",
-    "overviews.md",
     "wiki/concepts/amazonas-travel-planning.md",
     "wiki/overviews/amazonas-tourism-overview.md",
     "wiki/entities/super-mario-bros-3-items.md",

@@ -31,6 +31,7 @@ from agno.vectordb.chroma import ChromaDb, SearchType
 LOAD_DOCS = False
 DOCS_PATH = "wiki"
 CHAT_MODEL = "llama3.1:8b"
+PREPROCESS_MODEL = "llama3.1:8b"  # Modelo para pré-processamento de documentos
 EMBED_MODEL = "nomic-embed-text:v1.5"
 DB_FILE = "tmp/agent.db"
 SESSION_ID = "amazonas_travel_rag"
@@ -120,27 +121,40 @@ def save_conversation_history(history: List[Dict[str, str]]) -> None:
 
 
 # ---------- Funcao de RAG manual ----------
-def buscar_contexto(pergunta: str, top_k: int = 4) -> str:
+def buscar_contexto(pergunta: str, top_k: int = 4) -> tuple[str, list[str]]:
     """
-    Busca os trechos relevantes na wiki vetorial
-    e retorna apenas o conteudo textual.
+    Busca os trechos relevantes na wiki vetorial.
+    Retorna (contexto_texto, lista_de_fontes).
+    A lista de fontes contém os nomes dos arquivos .md usados.
     """
-
     resultados = vector_db.search(pergunta, limit=top_k)
     contextos = []
+    fontes: list[str] = []
+    fontes_vistas: set[str] = set()
 
     for i, doc in enumerate(resultados, start=1):
         conteudo = ""
+        fonte = ""
 
         if hasattr(doc, "content"):
             conteudo = doc.content
         elif isinstance(doc, dict):
             conteudo = doc.get("content", "")
 
+        # Tenta extrair nome do arquivo dos metadados
+        if hasattr(doc, "meta_data") and doc.meta_data:
+            fonte = doc.meta_data.get("name", "") or doc.meta_data.get("file", "")
+        elif isinstance(doc, dict):
+            meta = doc.get("meta_data", {})
+            fonte = meta.get("name", "") if meta else ""
+
         if conteudo:
             contextos.append(f"[Trecho {i}]\n{conteudo}")
+            if fonte and fonte not in fontes_vistas:
+                fontes.append(fonte)
+                fontes_vistas.add(fonte)
 
-    return "\n\n".join(contextos)
+    return "\n\n".join(contextos), fontes
 
 
 def build_history_text(history: List[Dict[str, str]]) -> str:
@@ -155,7 +169,12 @@ def build_history_text(history: List[Dict[str, str]]) -> str:
     return "\n".join(lines)
 
 
-def build_travel_prompt(pergunta: str, contexto: str, history_text: str = "") -> str:
+def build_travel_prompt(
+    pergunta: str,
+    contexto: str,
+    history_text: str = "",
+    fontes: list[str] | None = None,
+) -> str:
     history_section = (
         f"Historico da conversa anterior:\n{history_text}\n\n" if history_text else ""
     )
