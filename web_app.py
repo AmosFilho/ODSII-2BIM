@@ -1405,10 +1405,30 @@ Regras:
                 else:
                     markdown_content = extracted_text
 
-            # Salvar em wiki/uploads/
-            wiki_uploads_dir = Path("wiki/uploads")
-            wiki_uploads_dir.mkdir(exist_ok=True)
-            new_md_path = wiki_uploads_dir / f"{slug}.md"
+            # 1. Determinar a categoria com base no frontmatter ou no conteúdo
+            from wiki_engine import _parse_frontmatter
+            meta, _ = _parse_frontmatter(markdown_content)
+            category = meta.get("category", "").lower().strip()
+
+            def guess_category(text: str) -> str:
+                text_lower = text.lower()
+                if any(w in text_lower for w in ["roteiro", "itinerário", "dia 1", "dia 2", "dia 3"]):
+                    return "synthesis"
+                if any(w in text_lower for w in ["comparação", "comparativo", "diferença entre"]):
+                    return "comparisons"
+                if any(w in text_lower for w in ["visão geral", "panorama", "introdução ao turismo"]):
+                    return "overviews"
+                if any(w in text_lower for w in ["logística", "época", "segurança", "saúde", "sustentabilidade", "vacina"]):
+                    return "concepts"
+                return "entities"
+
+            if category not in {"entities", "concepts", "comparisons", "overviews", "synthesis"}:
+                category = guess_category(markdown_content)
+
+            # Salvar na pasta da categoria correspondente
+            wiki_category_dir = Path("wiki") / category
+            wiki_category_dir.mkdir(exist_ok=True)
+            new_md_path = wiki_category_dir / f"{slug}.md"
             new_md_path.write_text(markdown_content, encoding="utf-8")
 
             # ── Step 3: Embeddings ────────────────────────────────────────────
@@ -1469,7 +1489,7 @@ Regras:
                         neighbor_entries[doc_file] = round(similarity, 4)
 
             # Atualiza o grafo de conexões bidirecionais no arquivo .obsidian/graph.json
-            page_id = f"uploads/{slug}.md"
+            page_id = f"{category}/{slug}.md"
             await asyncio.get_event_loop().run_in_executor(
                 None,
                 lambda: wiki_graph.update_page_relations(page_id, neighbor_entries)
@@ -1512,6 +1532,62 @@ Regras:
                     None,
                     lambda: knowledge.add_content(path=str(new_md_path))
                 )
+
+            # Atualiza o arquivo wiki/index.md para incluir o link do novo documento na seção correta
+            def update_index_md(category: str, slug: str, title: str) -> None:
+                index_path = Path("wiki/index.md")
+                if not index_path.exists():
+                    return
+                content = index_path.read_text(encoding="utf-8")
+                link_target = f"{category}/{slug}.md"
+                if link_target in content:
+                    return
+                headers = {
+                    "overviews": "## Visão Geral",
+                    "entities": "## Entidades",
+                    "concepts": "## Conceitos",
+                    "synthesis": "## Síntese",
+                    "comparisons": "## Comparações"
+                }
+                header = headers.get(category)
+                if not header or header not in content:
+                    # Fallback: anexar no final antes de '---'
+                    if "---" in content:
+                        parts = content.split("---")
+                        parts[-2] = parts[-2].rstrip() + f"\n- [{title}]({link_target})\n\n"
+                        updated = "---".join(parts)
+                    else:
+                        updated = content.rstrip() + f"\n\n- [{title}]({link_target})\n"
+                else:
+                    header_idx = content.find(header)
+                    next_header_idx = len(content)
+                    for h in headers.values():
+                        if h == header:
+                            continue
+                        idx = content.find(h, header_idx + len(header))
+                        if idx != -1 and idx < next_header_idx:
+                            next_header_idx = idx
+                    idx = content.find("---", header_idx + len(header))
+                    if idx != -1 and idx < next_header_idx:
+                        next_header_idx = idx
+                    section_content = content[header_idx:next_header_idx]
+                    lines = section_content.splitlines()
+                    insert_line_idx = -1
+                    for i, line in enumerate(lines):
+                        if line.strip().startswith("- "):
+                            insert_line_idx = i
+                    if insert_line_idx != -1:
+                        lines.insert(insert_line_idx + 1, f"- [{title}]({link_target})")
+                        new_section = "\n".join(lines) + "\n"
+                    else:
+                        new_section = section_content.rstrip() + f"\n\n- [{title}]({link_target})\n\n"
+                    updated = content[:header_idx] + new_section + content[next_header_idx:]
+                index_path.write_text(updated, encoding="utf-8")
+
+            await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: update_index_md(category, slug, title)
+            )
 
             push("done", "✓ Concluído!", done=True)
 
