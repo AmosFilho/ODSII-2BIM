@@ -8,6 +8,7 @@ IA vertical com RAG para turismo e viagens no Amazonas. O projeto combina uma wi
 2. Baixe os modelos:
 
 ```powershell
+ollama pull qwen2.5:7b
 ollama pull llama3.1:8b
 ollama pull nomic-embed-text
 ```
