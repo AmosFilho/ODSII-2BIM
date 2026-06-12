@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "overviews.md",
+                "file": "wiki/index.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "overviews"
+              "title": "index"
             }
           }
         ]
@@ -183,25 +183,28 @@
       "bases:Criar nova base": false
     }
   },
-  "active": "4d722d10db0ebb1d",
+  "active": "b37a82f1096ff208",
   "lastOpenFiles": [
+    "wiki/uploads/amazonas_guia_turistico_digital-ptbr_.md",
+    "README.md",
+    "raw_sources/Amazonas_Guia_Turistico_Digital-ptBR_.pdf",
+    "overviews.md",
+    "CLAUDE.md",
+    "raw_sources/amazonas-tourism-seed.md",
+    "tmp/agent.db-journal",
+    "__pycache__/wiki_graph.cpython-312.pyc",
+    "wiki_graph.py",
+    "raw_sources/www-amazonasemais-com-br-parintins-roteiro-para-voce-curtir-.md",
+    "Base64-Image-Removed.md",
     "tmp/chromadb/chroma.sqlite3-journal",
     "__pycache__/wiki_engine.cpython-312.pyc",
     "wiki_engine.py",
-    "README.md",
     "raw_sources/Prot-tipo-de-Jogo-Sustentabilidade---Wireframe-cc-Premium17199545746911719954575.pdf",
     "raw_sources/Exercícios Aula Invertida Heskell-AmósDCMFilho.pdf",
     "scripts/generate_wiki_openclaude.py",
-    "scripts",
-    "run-openclaude.ps1",
-    "init-env.ps1",
-    "__pycache__/wiki_processor.cpython-312.pyc",
-    "wiki_processor.py",
-    "overviews.md",
     "wiki/concepts/amazonas-travel-planning.md",
     "wiki/overviews/amazonas-tourism-overview.md",
     "wiki/entities/super-mario-bros-3-items.md",
-    "wiki/entities/super-mario-bros-3-enemies.md",
-    "CLAUDE.md"
+    "wiki/entities/super-mario-bros-3-enemies.md"
   ]
 }

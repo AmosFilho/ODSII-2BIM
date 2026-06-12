@@ -1,11 +1,14 @@
 from fastapi import FastAPI, Request, File, UploadFile
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse
 from pathlib import Path
+import asyncio
+import json
+import uuid
 import shutil
 
-from agent import SESSION_ID, agent, knowledge
+from agent import SESSION_ID, agent, knowledge, PREPROCESS_MODEL
 from agent import build_history_text, build_travel_prompt, buscar_contexto
 from agent import load_conversation_history, save_conversation_history
 from agent import safe_agent_run
@@ -17,7 +20,13 @@ from wiki_engine import (
     find_related_pages,
     build_wiki_index_data,
     render_markdown_to_html,
+    chunk_markdown,
 )
+import wiki_graph
+from agno.vectordb.chroma import SearchType
+
+# ── In-memory task store for SSE upload progress ────────────────────────────
+_upload_tasks: dict[str, dict] = {}
 
 app = FastAPI(title="AmazonIA Travel")
 app.add_middleware(
@@ -436,6 +445,55 @@ def index() -> HTMLResponse:
       display: block;
     }
 
+    /* ── Upload progress bar ─────────────────────────────── */
+    .upload-progress {
+      display: none;
+      margin-top: 12px;
+      background: rgba(22,75,53,0.07);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px 14px;
+      font-size: 13px;
+    }
+    .upload-progress.active { display: block; }
+    .upload-progress-bar-wrap {
+      background: var(--line);
+      border-radius: 4px;
+      height: 6px;
+      margin: 8px 0 10px;
+      overflow: hidden;
+    }
+    .upload-progress-bar {
+      height: 6px;
+      background: linear-gradient(90deg, var(--forest), var(--river));
+      border-radius: 4px;
+      width: 0%;
+      transition: width 0.5s ease;
+    }
+    .upload-progress-steps { display: grid; gap: 4px; }
+    .upload-step {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .upload-step.done { color: var(--forest); font-weight: 600; }
+    .upload-step.active { color: var(--river); font-weight: 600; }
+    .upload-step .step-icon { font-size: 14px; min-width: 18px; text-align: center; }
+
+    /* ── Source attribution block ────────────────────────── */
+    .source-block {
+      margin-top: 10px;
+      padding: 8px 12px;
+      background: rgba(22,75,53,0.08);
+      border-left: 3px solid var(--forest);
+      border-radius: 0 6px 6px 0;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .source-block strong { color: var(--forest); }
+
     /* ── Wiki layout ─────────────────────────────────── */
     .wiki-layout {
       flex: 1;
@@ -687,7 +745,7 @@ def index() -> HTMLResponse:
             <h1>Consultor inteligente para viagens ao Amazonas</h1>
             <p class="subtitle">Pergunte sobre destinos, logistica, epocas do ano, experiencias culturais, seguranca e planejamento responsavel.</p>
           </div>
-          <div class="badge">Base local + consulta atual quando necessario</div>
+          <div class="badge">Base local (Wiki)</div>
         </header>
 
         <div id="chat" class="chat-window"></div>
@@ -698,10 +756,22 @@ def index() -> HTMLResponse:
           <input type="file" id="fileInput" accept=".pdf,.txt,.md" />
           <div class="upload-feedback" id="uploadFeedback"></div>
         </div>
+        <div class="upload-progress" id="uploadProgress">
+          <div id="uploadProgressLabel" style="font-weight:600;color:var(--forest);margin-bottom:4px;">Processando...</div>
+          <div class="upload-progress-bar-wrap">
+            <div class="upload-progress-bar" id="uploadProgressBar"></div>
+          </div>
+          <div class="upload-progress-steps" id="uploadSteps">
+            <div class="upload-step" id="step-read"><span class="step-icon">📂</span> Lendo arquivo</div>
+            <div class="upload-step" id="step-preprocess"><span class="step-icon">🤖</span> Pré-processando com LLM</div>
+            <div class="upload-step" id="step-embed"><span class="step-icon">🔢</span> Gerando embeddings</div>
+            <div class="upload-step" id="step-index"><span class="step-icon">🗄️</span> Indexando no banco vetorial</div>
+            <div class="upload-step" id="step-done"><span class="step-icon">✅</span> Concluído</div>
+          </div>
+        </div>
 
         <div class="controls">
           <input id="message" type="text" placeholder="Ex.: Quero um roteiro com natureza, cultura e pouco deslocamento..." autocomplete="off" />
-          <button id="voiceBtn" class="action secondary">Voz</button>
           <button id="sendBtn" class="action">Enviar</button>
         </div>
         <div class="footer">A resposta usa a wiki local como fonte principal. Precos, horarios e disponibilidade devem ser verificados em fonte atual.</div>
@@ -769,24 +839,8 @@ def index() -> HTMLResponse:
     const chat = document.getElementById('chat');
     const messageInput = document.getElementById('message');
     const sendBtn = document.getElementById('sendBtn');
-    const voiceBtn = document.getElementById('voiceBtn');
 
-    const addMessage = (role, text) => {
-      const container = document.createElement('div');
-      container.className = `message ${role}`;
-      const bubble = document.createElement('div');
-      bubble.className = 'bubble';
-      if (role === 'assistant' && typeof marked !== 'undefined') {
-        bubble.innerHTML = marked.parse(text);
-      } else {
-        bubble.textContent = text;
-      }
-      container.appendChild(bubble);
-      chat.appendChild(container);
-      chat.scrollTop = chat.scrollHeight;
-    };
-
-    addMessage('assistant', 'Ola. Sou a AmazonIA Travel. Posso montar roteiros, comparar epocas, sugerir destinos e apontar cuidados para viajar pelo Amazonas.');
+    // addMessage is now redefined below with sources support
 
     const showTyping = () => {
       const container = document.createElement('div');
@@ -805,13 +859,38 @@ def index() -> HTMLResponse:
       if (el) el.remove();
     };
 
+    const addMessage = (role, text, sources) => {
+      const container = document.createElement('div');
+      container.className = `message ${role}`;
+      const bubble = document.createElement('div');
+      bubble.className = 'bubble';
+      if (role === 'assistant' && typeof marked !== 'undefined') {
+        bubble.innerHTML = marked.parse(text);
+        // Append source block if sources available
+        if (sources && sources.length > 0) {
+          const srcBlock = document.createElement('div');
+          srcBlock.className = 'source-block';
+          srcBlock.innerHTML = `<strong>📄 Fontes consultadas:</strong> ${sources.map(s => `<code>${s}</code>`).join(', ')}`;
+          bubble.appendChild(srcBlock);
+        }
+      } else {
+        bubble.textContent = text;
+      }
+      container.appendChild(bubble);
+      chat.appendChild(container);
+      chat.scrollTop = chat.scrollHeight;
+    };
+
+    // Override initial greeting
+    chat.innerHTML = '';
+    addMessage('assistant', 'Ola. Sou a AmazonIA Travel. Posso montar roteiros, comparar epocas, sugerir destinos e apontar cuidados para viajar pelo Amazonas.');
+
     const sendMessage = async (rawText) => {
       const text = rawText || messageInput.value.trim();
       if (!text) return;
       addMessage('user', text);
       messageInput.value = '';
       sendBtn.disabled = true;
-      voiceBtn.disabled = true;
       showTyping();
 
       try {
@@ -822,13 +901,12 @@ def index() -> HTMLResponse:
         });
         const data = await response.json();
         hideTyping();
-        addMessage('assistant', data.answer || 'Nao foi possivel obter resposta.');
+        addMessage('assistant', data.answer || 'Nao foi possivel obter resposta.', data.sources);
       } catch (error) {
         hideTyping();
         addMessage('assistant', 'Erro ao chamar o servidor: ' + error.message);
       } finally {
         sendBtn.disabled = false;
-        voiceBtn.disabled = false;
       }
     };
 
@@ -844,35 +922,7 @@ def index() -> HTMLResponse:
       }
     });
 
-    let recognition = null;
-    if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-      recognition = new SpeechRecognition();
-      recognition.lang = 'pt-BR';
-      recognition.interimResults = false;
-      recognition.maxAlternatives = 1;
 
-      recognition.addEventListener('result', (event) => {
-        const transcript = event.results[0][0].transcript;
-        messageInput.value = transcript;
-        sendMessage(transcript);
-      });
-
-      recognition.addEventListener('end', () => {
-        voiceBtn.textContent = 'Voz';
-        voiceBtn.disabled = false;
-      });
-    } else {
-      voiceBtn.disabled = true;
-      voiceBtn.textContent = 'Sem voz';
-    }
-
-    voiceBtn.addEventListener('click', () => {
-      if (!recognition) return;
-      voiceBtn.disabled = true;
-      voiceBtn.textContent = 'Ouvindo...';
-      recognition.start();
-    });
 
     // Upload de arquivos
     const uploadZone = document.getElementById('uploadZone');
@@ -921,22 +971,94 @@ def index() -> HTMLResponse:
       }
     };
 
+    // ── Upload progress helpers ──────────────────────────────────────────
+    const STEPS = ['read', 'preprocess', 'embed', 'index', 'done'];
+    const STEP_PROGRESS = { read: 10, preprocess: 40, embed: 65, index: 85, done: 100 };
+    const uploadProgress = document.getElementById('uploadProgress');
+    const uploadProgressBar = document.getElementById('uploadProgressBar');
+    const uploadProgressLabel = document.getElementById('uploadProgressLabel');
+
+    const resetProgressUI = () => {
+      STEPS.forEach(s => {
+        const el = document.getElementById(`step-${s}`);
+        if (el) { el.classList.remove('active', 'done'); }
+      });
+      uploadProgressBar.style.width = '0%';
+      uploadProgressLabel.textContent = 'Processando...';
+      uploadProgress.classList.add('active');
+    };
+
+    const applyStep = (step) => {
+      const pct = STEP_PROGRESS[step] || 0;
+      uploadProgressBar.style.width = pct + '%';
+      STEPS.forEach(s => {
+        const el = document.getElementById(`step-${s}`);
+        if (!el) return;
+        if (s === step) {
+          el.classList.add('active');
+          el.classList.remove('done');
+        } else if (STEPS.indexOf(s) < STEPS.indexOf(step)) {
+          el.classList.remove('active');
+          el.classList.add('done');
+        }
+      });
+      if (step === 'done') {
+        uploadProgressLabel.textContent = '✓ Concluído!';
+        setTimeout(() => uploadProgress.classList.remove('active'), 3000);
+      }
+    };
+
     const uploadFile = async (file) => {
       const formData = new FormData();
       formData.append('file', file);
+
+      resetProgressUI();
+      applyStep('read');
 
       try {
         const response = await fetch('/upload', {
           method: 'POST',
           body: formData,
         });
-        const data = await response.json();
-        if (response.ok) {
-          showFeedback(`✓ "${file.name}" adicionado à base de conhecimento!`, true);
-        } else {
+
+        if (!response.ok) {
+          const data = await response.json();
+          uploadProgress.classList.remove('active');
           showFeedback(`Erro: ${data.detail || 'Falha ao enviar arquivo'}`, false);
+          return;
         }
+
+        const data = await response.json();
+        const taskId = data.task_id;
+
+        if (!taskId) {
+          uploadProgress.classList.remove('active');
+          showFeedback(`✓ "${file.name}" adicionado!`, true);
+          return;
+        }
+
+        // Connect to SSE stream
+        const evtSource = new EventSource(`/upload/progress/${taskId}`);
+        evtSource.onmessage = (e) => {
+          const msg = JSON.parse(e.data);
+          if (msg.step) applyStep(msg.step);
+          if (msg.label) uploadProgressLabel.textContent = msg.label;
+          if (msg.done) {
+            evtSource.close();
+            if (msg.error) {
+              uploadProgress.classList.remove('active');
+              showFeedback(`Erro: ${msg.error}`, false);
+            } else {
+              showFeedback(`✓ "${file.name}" adicionado à base de conhecimento!`, true);
+            }
+          }
+        };
+        evtSource.onerror = () => {
+          evtSource.close();
+          uploadProgress.classList.remove('active');
+        };
       } catch (error) {
+        uploadProgress.classList.remove('active');
         showFeedback('Erro ao enviar arquivo: ' + error.message, false);
       }
     };
@@ -1011,15 +1133,35 @@ def index() -> HTMLResponse:
           wikiToc.style.display = 'none';
         }
 
-        // Load related pages
-        await loadRelatedPages(cat, slug);
-
-        // Bind clicks on related links
-        wikiBody.querySelectorAll('.wiki-related .wiki-page-link').forEach(link => {
-          link.addEventListener('click', (e) => {
-            e.preventDefault();
-            openWikiPage(link.dataset.cat, link.dataset.slug, link.dataset.file);
+        // Load related pages only if not already present in the Markdown content (Obsidian integration)
+        if (!wikiBody.innerHTML.includes('Páginas Relacionadas')) {
+          await loadRelatedPages(cat, slug);
+          
+          // Bind clicks on dynamically loaded related links
+          wikiBody.querySelectorAll('.wiki-related .wiki-page-link').forEach(link => {
+            link.addEventListener('click', (e) => {
+              e.preventDefault();
+              openWikiPage(link.dataset.cat, link.dataset.slug, link.dataset.file);
+            });
           });
+        }
+
+        // Bind clicks on standard relative links inside the markdown body (Obsidian integration)
+        wikiBody.querySelectorAll('a').forEach(link => {
+          const href = link.getAttribute('href');
+          if (href && href.startsWith('../')) {
+            const parts = href.split('/');
+            if (parts.length >= 3) {
+              const rCat = parts[parts.length - 2];
+              const rFile = parts[parts.length - 1];
+              const rSlug = rFile.replace('.md', '');
+              
+              link.addEventListener('click', (e) => {
+                e.preventDefault();
+                openWikiPage(rCat, rSlug, `${rCat}/${rFile}`);
+              });
+            }
+          }
         });
 
         // Scroll to top
@@ -1104,32 +1246,76 @@ async def chat(request: Request) -> JSONResponse:
 
     conversation_history = load_conversation_history()
     history_text = build_history_text(conversation_history)
-    contexto = buscar_contexto(message)
-    prompt = build_travel_prompt(message, contexto, history_text)
+    contexto, fontes = buscar_contexto(message)
+    prompt = build_travel_prompt(message, contexto, history_text, fontes)
 
     answer = safe_agent_run(prompt, session_id=SESSION_ID)
     conversation_history.append({"role": "user", "content": message})
     conversation_history.append({"role": "assistant", "content": answer})
     save_conversation_history(conversation_history)
 
-    return JSONResponse({"answer": answer})
+    return JSONResponse({"answer": answer, "sources": fontes})
+
+@app.get("/upload/progress/{task_id}")
+async def upload_progress(task_id: str):
+    """
+    SSE endpoint — publica eventos de progresso do upload enquanto a tarefa roda.
+    Cada evento é um JSON com: step, label, done, error (opcional).
+    """
+    async def event_generator():
+        while True:
+            task = _upload_tasks.get(task_id)
+            if task is None:
+                yield f"data: {json.dumps({'done': True, 'error': 'task not found'})}\n\n"
+                break
+
+            events: list[dict] = task.get("events", [])
+            last_sent = task.get("last_sent", 0)
+
+            for evt in events[last_sent:]:
+                yield f"data: {json.dumps(evt)}\n\n"
+                last_sent += 1
+
+            task["last_sent"] = last_sent
+
+            if task.get("finished"):
+                # Clean up after sending all events
+                _upload_tasks.pop(task_id, None)
+                break
+
+            await asyncio.sleep(0.3)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.post("/upload")
 async def upload_file(file: UploadFile = File(...)) -> JSONResponse:
     """
-    Endpoint para receber arquivos (PDF, TXT, MD) e adicionar à base de conhecimento.
+    Recebe arquivos (PDF, TXT, MD), converte para Markdown (com LLM para .txt/.pdf),
+    compara embeddings com a wiki, atualiza páginas semelhantes e indexa no RAG.
+    Retorna task_id imediatamente; progresso exposto via SSE em /upload/progress/{task_id}.
     """
+    import re
+    import math
+    import pypdf
+    import ollama
+    from agent import vector_db, CHAT_MODEL
+    from wiki_engine import _parse_frontmatter
+
     # Validar extensão
     allowed_extensions = {".pdf", ".txt", ".md"}
     file_ext = Path(file.filename).suffix.lower()
-    
+
     if file_ext not in allowed_extensions:
         return JSONResponse(
             {"detail": "Apenas arquivos PDF, TXT e MD são aceitos."},
             status_code=400,
         )
-    
+
     # Validar tamanho (máx 10 MB)
     max_size = 10 * 1024 * 1024
     file_contents = await file.read()
@@ -1138,32 +1324,283 @@ async def upload_file(file: UploadFile = File(...)) -> JSONResponse:
             {"detail": "Arquivo muito grande (máximo 10 MB)."},
             status_code=413,
         )
-    
-    try:
-        # Salvar arquivo temporariamente na pasta raw_sources
-        raw_sources_dir = Path("raw_sources")
-        raw_sources_dir.mkdir(exist_ok=True)
-        
-        temp_file_path = raw_sources_dir / file.filename
-        with open(temp_file_path, "wb") as f:
-            f.write(file_contents)
-        
-        # Adicionar à base de conhecimento
-        knowledge.add_content(path=str(temp_file_path))
-        
-        return JSONResponse(
-            {
-                "status": "success",
-                "message": f"Arquivo '{file.filename}' adicionado com sucesso à base de conhecimento.",
-                "file_path": str(temp_file_path),
-            },
-            status_code=200,
-        )
-    except Exception as e:
-        return JSONResponse(
-            {"detail": f"Erro ao processar arquivo: {str(e)}"},
-            status_code=500,
-        )
+
+    # Criar task e registrar no store
+    task_id = str(uuid.uuid4())
+    _upload_tasks[task_id] = {"events": [], "finished": False, "last_sent": 0}
+
+    def push(step: str, label: str, done: bool = False, error: str = ""):
+        evt: dict = {"step": step, "label": label, "done": done}
+        if error:
+            evt["error"] = error
+        _upload_tasks[task_id]["events"].append(evt)
+        if done:
+            _upload_tasks[task_id]["finished"] = True
+
+    # Snapshot dos dados necessários antes de lançar background task
+    filename = file.filename
+
+    async def process():
+        try:
+            # ── Step 1: Ler arquivo ───────────────────────────────────────────
+            push("read", "📂 Lendo arquivo...")
+            raw_sources_dir = Path("raw_sources")
+            raw_sources_dir.mkdir(exist_ok=True)
+            temp_file_path = raw_sources_dir / filename
+            with open(temp_file_path, "wb") as f:
+                f.write(file_contents)
+
+            extracted_text = ""
+            if file_ext == ".pdf":
+                reader = pypdf.PdfReader(temp_file_path)
+                for page in reader.pages:
+                    extracted_text += page.extract_text() or ""
+            else:
+                extracted_text = file_contents.decode("utf-8", errors="ignore")
+
+            stem = Path(filename).stem
+            slug = re.sub(r"[^a-zA-ZÀ-ÿ0-9 _-]", "", stem)
+            slug = slug.strip().replace(" ", "-").lower()
+            title = stem.replace("-", " ").replace("_", " ").title()
+
+            # ── Step 2: Pré-processamento LLM (apenas .txt e .pdf) ──────────
+            if file_ext in (".txt", ".pdf"):
+                push("preprocess", "🤖 Pré-processando com LLM...")
+                preprocess_prompt = f"""Você é um editor técnico especializado em turismo no Amazonas.
+Sua tarefa é transformar o texto bruto abaixo em um documento Markdown bem estruturado.
+
+Regras:
+1. Use um título principal H1 (# Título) descritivo.
+2. Organize o conteúdo em seções com headers H2 (## Seção) e H3 (### Subção) quando adequado.
+3. Use listas com marcadores para enumerações.
+4. Use tabelas Markdown para dados comparativos.
+5. Preserve todos os fatos e dados do texto original.
+6. Não invente informações.
+7. Retorne APENAS o Markdown final, sem comentários ou blocos de código extras.
+
+--- TEXTO BRUTO ---
+{extracted_text[:8000]}
+--- FIM DO TEXTO ---"""
+                llm_resp = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: ollama.generate(
+                        model=PREPROCESS_MODEL,
+                        prompt=preprocess_prompt,
+                        options={"temperature": 0.2},
+                    ),
+                )
+                markdown_content = llm_resp["response"].strip()
+                # Limpar possivel bloco ```markdown
+                if markdown_content.startswith("```markdown"):
+                    markdown_content = markdown_content[11:].strip()
+                elif markdown_content.startswith("```"):
+                    markdown_content = markdown_content[3:].strip()
+                if markdown_content.endswith("```"):
+                    markdown_content = markdown_content[:-3].strip()
+            else:
+                # .md já está formatado — pular pré-processamento
+                push("preprocess", "⏩ Arquivo .md detectado, pré-processamento ignorado")
+                if not extracted_text.strip().startswith("#"):
+                    markdown_content = f"# {title}\n\n{extracted_text}"
+                else:
+                    markdown_content = extracted_text
+
+            # 1. Determinar a categoria com base no frontmatter ou no conteúdo
+            from wiki_engine import _parse_frontmatter
+            meta, _ = _parse_frontmatter(markdown_content)
+            category = meta.get("category", "").lower().strip()
+
+            def guess_category(text: str) -> str:
+                text_lower = text.lower()
+                if any(w in text_lower for w in ["roteiro", "itinerário", "dia 1", "dia 2", "dia 3"]):
+                    return "synthesis"
+                if any(w in text_lower for w in ["comparação", "comparativo", "diferença entre"]):
+                    return "comparisons"
+                if any(w in text_lower for w in ["visão geral", "panorama", "introdução ao turismo"]):
+                    return "overviews"
+                if any(w in text_lower for w in ["logística", "época", "segurança", "saúde", "sustentabilidade", "vacina"]):
+                    return "concepts"
+                return "entities"
+
+            if category not in {"entities", "concepts", "comparisons", "overviews", "synthesis"}:
+                category = guess_category(markdown_content)
+
+            # Salvar na pasta da categoria correspondente
+            wiki_category_dir = Path("wiki") / category
+            wiki_category_dir.mkdir(exist_ok=True)
+            new_md_path = wiki_category_dir / f"{slug}.md"
+            new_md_path.write_text(markdown_content, encoding="utf-8")
+
+            # ── Step 3: Embeddings ────────────────────────────────────────────
+            push("embed", "🔢 Gerando embeddings e indexando...")
+
+            # Deleta versão antiga da base de conhecimento (se houver) e adiciona a nova
+            await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: vector_db.delete_by_metadata(metadata={"name": new_md_path.name})
+            )
+            await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: knowledge.add_content(path=str(new_md_path))
+            )
+
+            # ── Step 4: Indexar ───────────────────────────────────────────────
+            push("index", "🗄️ Atualizando grafo de relacionamentos...")
+
+            # Alterna temporariamente para busca vetorial pura para obter as distâncias
+            orig_search_type = vector_db.search_type
+            vector_db.search_type = SearchType.vector
+
+            # Busca os 20 vizinhos mais próximos no ChromaDB usando o conteúdo do novo documento
+            raw_neighbors = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: vector_db.search(markdown_content, limit=20)
+            )
+
+            # Restaura o tipo de busca original
+            vector_db.search_type = orig_search_type
+
+            neighbor_entries: dict[str, float] = {}
+            for doc in raw_neighbors:
+                doc_name = getattr(doc, "name", "")
+                if not doc_name or doc_name == new_md_path.name:
+                    continue
+                if doc_name == "index.md":
+                    continue
+
+                # Localizar o caminho relativo correspondente ao arquivo
+                doc_file = ""
+                wiki_dir_path = Path("wiki")
+                for candidate in wiki_dir_path.rglob("*.md"):
+                    if candidate.name == doc_name:
+                        doc_file = str(candidate.relative_to(wiki_dir_path)).replace("\\", "/")
+                        break
+
+                if not doc_file:
+                    continue
+
+                # Extrair distância e calcular similaridade cosseno
+                distance = doc.meta_data.get("distances", 1.0) if hasattr(doc, "meta_data") and doc.meta_data else 1.0
+                similarity = 1.0 - distance
+
+                # Reter apenas conexões com relação relevante (similaridade >= 0.5)
+                if similarity >= 0.5:
+                    if doc_file not in neighbor_entries or similarity > neighbor_entries[doc_file]:
+                        neighbor_entries[doc_file] = round(similarity, 4)
+
+            # Atualiza o grafo de conexões bidirecionais no arquivo .obsidian/graph.json
+            page_id = f"{category}/{slug}.md"
+            await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: wiki_graph.update_page_relations(page_id, neighbor_entries)
+            )
+
+            # Anexa os links das páginas relacionadas no final do novo Markdown para visualização no gráfico do Obsidian
+            if neighbor_entries:
+                links_md = "\n\n## Páginas Relacionadas\n"
+                for neighbor_file, similarity in neighbor_entries.items():
+                    # Tentar extrair o título real do arquivo relacionado para exibição
+                    neighbor_title = neighbor_file.split("/")[-1].replace(".md", "").replace("-", " ").replace("_", " ").title()
+                    try:
+                        n_path = Path("wiki") / neighbor_file
+                        if n_path.is_file():
+                            from wiki_engine import _parse_frontmatter, _extract_h1_title
+                            n_text = n_path.read_text(encoding="utf-8")
+                            meta, body = _parse_frontmatter(n_text)
+                            title_val = meta.get("title") or _extract_h1_title(body)
+                            if title_val:
+                                neighbor_title = title_val
+                    except Exception:
+                        pass
+                    
+                    links_md += f"- [{neighbor_title}](../{neighbor_file})\n"
+
+                # Limpa qualquer seção antiga de relacionados no conteúdo gerado
+                content_to_write = markdown_content
+                if "## Páginas Relacionadas" in content_to_write:
+                    content_to_write = content_to_write.split("## Páginas Relacionadas")[0].strip()
+
+                updated_content = content_to_write + links_md
+                new_md_path.write_text(updated_content, encoding="utf-8")
+
+                # Reindexa o arquivo atualizado com os links para manter o banco vetorial em sincronia
+                await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: vector_db.delete_by_metadata(metadata={"name": new_md_path.name})
+                )
+                await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: knowledge.add_content(path=str(new_md_path))
+                )
+
+            # Atualiza o arquivo wiki/index.md para incluir o link do novo documento na seção correta
+            def update_index_md(category: str, slug: str, title: str) -> None:
+                index_path = Path("wiki/index.md")
+                if not index_path.exists():
+                    return
+                content = index_path.read_text(encoding="utf-8")
+                link_target = f"{category}/{slug}.md"
+                if link_target in content:
+                    return
+                headers = {
+                    "overviews": "## Visão Geral",
+                    "entities": "## Entidades",
+                    "concepts": "## Conceitos",
+                    "synthesis": "## Síntese",
+                    "comparisons": "## Comparações"
+                }
+                header = headers.get(category)
+                if not header or header not in content:
+                    # Fallback: anexar no final antes de '---'
+                    if "---" in content:
+                        parts = content.split("---")
+                        parts[-2] = parts[-2].rstrip() + f"\n- [{title}]({link_target})\n\n"
+                        updated = "---".join(parts)
+                    else:
+                        updated = content.rstrip() + f"\n\n- [{title}]({link_target})\n"
+                else:
+                    header_idx = content.find(header)
+                    next_header_idx = len(content)
+                    for h in headers.values():
+                        if h == header:
+                            continue
+                        idx = content.find(h, header_idx + len(header))
+                        if idx != -1 and idx < next_header_idx:
+                            next_header_idx = idx
+                    idx = content.find("---", header_idx + len(header))
+                    if idx != -1 and idx < next_header_idx:
+                        next_header_idx = idx
+                    section_content = content[header_idx:next_header_idx]
+                    lines = section_content.splitlines()
+                    insert_line_idx = -1
+                    for i, line in enumerate(lines):
+                        if line.strip().startswith("- "):
+                            insert_line_idx = i
+                    if insert_line_idx != -1:
+                        lines.insert(insert_line_idx + 1, f"- [{title}]({link_target})")
+                        new_section = "\n".join(lines) + "\n"
+                    else:
+                        new_section = section_content.rstrip() + f"\n\n- [{title}]({link_target})\n\n"
+                    updated = content[:header_idx] + new_section + content[next_header_idx:]
+                index_path.write_text(updated, encoding="utf-8")
+
+            await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: update_index_md(category, slug, title)
+            )
+
+            push("done", "✓ Concluído!", done=True)
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            _upload_tasks[task_id]["events"].append(
+                {"step": "done", "label": f"Erro: {e}", "done": True, "error": str(e)}
+            )
+            _upload_tasks[task_id]["finished"] = True
+
+    asyncio.create_task(process())
+    return JSONResponse({"task_id": task_id, "status": "processing"})
 
 
 # ── Wiki endpoints ─────────────────────────────────────────────────────────────
@@ -1232,19 +1669,21 @@ def wiki_ask(req: WikiAskRequest) -> JSONResponse:
                 page_context = f"\n\n--- Conteúdo da página '{page_data['title']}' ---\n{page_data['markdown']}\n--- Fim da página ---\n"
 
     # Busca contexto adicional via RAG
-    rag_context = buscar_contexto(question)
+    rag_context, rag_fontes = buscar_contexto(question)
 
     # Combina contextos
     combined_context = ""
+    all_fontes: list[str] = []
     if page_context:
         combined_context += page_context
     if rag_context:
         combined_context += f"\n\n--- Contexto adicional da base ---\n{rag_context}"
+        all_fontes.extend(rag_fontes)
 
     conversation_history = load_conversation_history()
     history_text = build_history_text(conversation_history)
 
-    prompt = build_travel_prompt(question, combined_context, history_text)
+    prompt = build_travel_prompt(question, combined_context, history_text, all_fontes)
 
     result = agent.run(
         prompt,
@@ -1259,7 +1698,7 @@ def wiki_ask(req: WikiAskRequest) -> JSONResponse:
     conversation_history.append({"role": "assistant", "content": answer})
     save_conversation_history(conversation_history)
 
-    return JSONResponse({"answer": answer, "page": req.page})
+    return JSONResponse({"answer": answer, "page": req.page, "sources": all_fontes})
 
 
 if __name__ == "__main__":

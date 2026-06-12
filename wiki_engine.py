@@ -20,6 +20,8 @@ from markdown.extensions.codehilite import CodeHiliteExtension
 from markdown.extensions.fenced_code import FencedCodeExtension
 from markdown.extensions.toc import TocExtension
 
+import wiki_graph
+
 WIKI_DIR = Path("wiki")
 
 # ── Frontmatter parsing ──────────────────────────────────────────────────────
@@ -59,6 +61,21 @@ _md = markdown.Markdown(
 
 
 def render_markdown_to_html(text: str) -> tuple[str, str]:
+    """Converte Markdown para HTML, removendo links de imagens e links externos.
+    Mantém links internos (relativos) e formata o texto limpo.
+    """
+    # Remove sintaxe de imagens Markdown: ![alt](url)
+    text = re.sub(r'!\[[^\]]*\]\([^\)]+\)', '', text)
+    # Remove links externos, mantendo apenas o texto âncora
+    def _strip_external(match: re.Match) -> str:
+        anchor, url = match.group(1), match.group(2)
+        if url.startswith('http://') or url.startswith('https://'):
+            return anchor  # devolve só o texto da âncora
+        return match.group(0)  # mantém o link original
+    text = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', _strip_external, text)
+    _md.reset()
+    html = _md.convert(text)
+    return html, _md.toc
     """
     Converte Markdown para HTML.
     Retorna (html, toc_html) — o sumário gerado pela extensão TOC.
@@ -66,6 +83,73 @@ def render_markdown_to_html(text: str) -> tuple[str, str]:
     _md.reset()
     html = _md.convert(text)
     return html, _md.toc
+
+
+# ── Chunking específico para Markdown ────────────────────────────────────────
+
+def chunk_markdown(text: str, max_chars: int = 1200) -> list[str]:
+    """
+    Divide um documento Markdown em chunks respeitando a estrutura de headers.
+
+    Estratégia:
+    1. Divide nos headers # / ## / ### mantendo o texto de cada seção junto.
+    2. Seções maiores que max_chars são subdivididas por parágrafos duplos.
+    3. Retorna lista de strings prontas para embedding.
+    """
+    # Padrão: qualquer linha que começa com # (H1–H6)
+    header_pattern = re.compile(r"^(#{1,6})\s+.+$", re.MULTILINE)
+
+    # Encontra as posições de cada header
+    splits = [m.start() for m in header_pattern.finditer(text)]
+
+    if not splits:
+        # Sem headers: usa divisão por parágrafo
+        return _split_by_paragraphs(text, max_chars)
+
+    # Garante que capturamos o texto antes do 1º header (introdução)
+    sections: list[str] = []
+    if splits[0] > 0:
+        intro = text[: splits[0]].strip()
+        if intro:
+            sections.append(intro)
+
+    for idx, start in enumerate(splits):
+        end = splits[idx + 1] if idx + 1 < len(splits) else len(text)
+        section = text[start:end].strip()
+        if section:
+            sections.append(section)
+
+    # Subdivide seções longas por parágrafo
+    chunks: list[str] = []
+    for section in sections:
+        if len(section) <= max_chars:
+            chunks.append(section)
+        else:
+            chunks.extend(_split_by_paragraphs(section, max_chars))
+
+    return [c for c in chunks if c.strip()]
+
+
+def _split_by_paragraphs(text: str, max_chars: int) -> list[str]:
+    """Divide texto por parágrafos duplos; agrega fragmentos pequenos."""
+    paragraphs = re.split(r"\n{2,}", text)
+    chunks: list[str] = []
+    current = ""
+    for para in paragraphs:
+        para = para.strip()
+        if not para:
+            continue
+        candidate = (current + "\n\n" + para).strip() if current else para
+        if len(candidate) <= max_chars:
+            current = candidate
+        else:
+            if current:
+                chunks.append(current)
+            # Parágrafo isolado maior que max_chars: mantém como chunk único
+            current = para
+    if current:
+        chunks.append(current)
+    return chunks
 
 
 # ── Sumário de headers ───────────────────────────────────────────────────────
@@ -219,11 +303,8 @@ def _tokenize(text: str) -> set[str]:
     return {m.lower() for m in _WORD_RE.findall(text)}
 
 
-def find_related_pages(category: str, slug: str, max_results: int = 3) -> list[dict[str, Any]]:
-    """
-    Encontra páginas relacionadas por overlap de palavras-chave (Jaccard simples).
-    Exclui a própria página.
-    """
+def _jaccard_related(category: str, slug: str, max_results: int) -> list[dict[str, Any]]:
+    """Fallback: Jaccard simples sobre tokens quando a página não está no grafo."""
     target_path = WIKI_DIR / category / f"{slug}.md"
     if not target_path.is_file():
         return []
@@ -267,6 +348,40 @@ def find_related_pages(category: str, slug: str, max_results: int = 3) -> list[d
 
     scored.sort(key=lambda r: r["score"], reverse=True)
     return scored[:max_results]
+
+
+def find_related_pages(category: str, slug: str, max_results: int = 3) -> list[dict[str, Any]]:
+    """
+    Encontra páginas relacionadas consultando o grafo de relacionamentos (.obsidian/graph.json).
+    Se a página não estiver no grafo, usa Jaccard como fallback.
+    """
+    page_path = f"{category}/{slug}.md"
+    relations = wiki_graph.get_page_relations(page_path)
+
+    if relations:
+        tree = list_wiki_pages()
+        all_pages = {}
+        for cat_name, pages in tree.items():
+            for p in pages:
+                all_pages[p["file"]] = p
+
+        scored = []
+        for file_path, score in relations.items():
+            if file_path in all_pages:
+                page_info = all_pages[file_path]
+                scored.append({
+                    "slug": page_info["slug"],
+                    "title": page_info["title"],
+                    "category": file_path.split("/")[0],
+                    "file": file_path,
+                    "score": round(score, 4),
+                })
+        scored.sort(key=lambda r: r["score"], reverse=True)
+        return scored[:max_results]
+
+    # Fallback para Jaccard
+    return _jaccard_related(category, slug, max_results)
+
 
 
 # ── Índice JSON ──────────────────────────────────────────────────────────────
